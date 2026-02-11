@@ -7,8 +7,8 @@ const readline = require('readline') as typeof import('readline');
 import { ElevenLabsClient } from 'elevenlabs';
 const ffmpeg = require('fluent-ffmpeg') as typeof import('fluent-ffmpeg');
 
-// CONFIG
-const TEST_MODE = false; // false = full 30s short with multiple scenes
+// CONFIG (test mode disabled — always full pipeline)
+const TEST_MODE = false;
 const REUSE_TEMP = false; // set true to skip API calls when script/audio/clips already exist
 const MANUAL_GROK = true; // true = no xAI API; you create clips in Grok terminal and put them in temp/
 const BACKGROUND_MUSIC_PATH = process.env.BACKGROUND_MUSIC_PATH || 'temp/background_music.mp3'; // optional; fade in/out applied
@@ -38,8 +38,12 @@ function waitForEnter(message: string): Promise<void> {
   });
 }
 
-const TEMP_DIR = path.resolve(process.cwd(), 'temp');
-const OUTPUT_DIR = path.resolve(process.cwd(), 'output');
+const TEMP_DIR = process.env.PROJECT_TEMP_DIR
+  ? path.resolve(process.env.PROJECT_TEMP_DIR)
+  : path.resolve(process.cwd(), 'temp');
+const OUTPUT_DIR = process.env.PROJECT_OUTPUT_DIR
+  ? path.resolve(process.env.PROJECT_OUTPUT_DIR)
+  : path.resolve(process.cwd(), 'output');
 
 function hasExistingProjectData(): boolean {
   if (!fs.existsSync(TEMP_DIR)) return false;
@@ -442,7 +446,11 @@ const SELECTED_TOPIC_FILE = path.join(TEMP_DIR, 'selected_topic.txt');
 
 async function main() {
   let topic: string;
-  if (TEST_MODE) {
+  const envTopic = process.env.SHORT_TOPIC_OVERRIDE?.trim();
+  if (envTopic) {
+    topic = envTopic;
+    log('MAIN', `Using topic from pipeline: "${topic}"`);
+  } else if (TEST_MODE) {
     topic = "A cat sleeping on a couch";
   } else if (fs.existsSync(SELECTED_TOPIC_FILE)) {
     topic = fs.readFileSync(SELECTED_TOPIC_FILE, 'utf-8').trim();
@@ -467,7 +475,12 @@ async function main() {
     log('MAIN', 'Existing project data found in temp/.');
     log('MAIN', 'We will save output/final_short.mp4 with a new name (if it exists) and clear temp/.');
     log('MAIN', '');
-    await waitForEnter('Press Enter to save previous video and clear temp (or Ctrl+C to exit)... ');
+    const nonInteractive = process.env.AUTO_CLEAR_TEMP === '1' || process.env.NON_INTERACTIVE === '1';
+    if (!nonInteractive) {
+      await waitForEnter('Press Enter to save previous video and clear temp (or Ctrl+C to exit)... ');
+    } else {
+      log('MAIN', 'AUTO_CLEAR_TEMP/NON_INTERACTIVE set — clearing temp without prompt.');
+    }
     savePreviousOutputAndClearTemp();
     log('MAIN', '');
   }
@@ -658,7 +671,16 @@ async function main() {
       log('VIDEO', 'Use each prompt to generate a clip, then download and save into temp/ with these exact names:');
       scenes.forEach((_, i) => log('VIDEO', `  clip_${i}.mp4`));
       log('MAIN', '');
-      await waitForEnter('Press Enter when all clips are in temp/ to continue to assembly... ');
+      const nonInteractive = process.env.AUTO_CLEAR_TEMP === '1' || process.env.NON_INTERACTIVE === '1';
+      if (!nonInteractive) {
+        await waitForEnter('Press Enter when all clips are in temp/ to continue to assembly... ');
+      } else {
+        const required = scenes.map((_, i) => `clip_${i}.mp4`);
+        const waitingPath = path.join(tempDirForClips, 'waiting_for_clips.json');
+        fs.writeFileSync(waitingPath, JSON.stringify({ required }, null, 2));
+        log('MAIN', 'NON_INTERACTIVE: wrote temp/waiting_for_clips.json — add clips then call POST /api/jobs/:id/continue');
+        process.exit(0);
+      }
       const nowExist = scenes.every((_, i) => fs.existsSync(path.join(tempDirForClips, `clip_${i}.mp4`)));
       if (!nowExist) {
         const missing = scenes.map((_, i) => `clip_${i}.mp4`).filter((name) => !fs.existsSync(path.join(tempDirForClips, name)));
@@ -686,7 +708,7 @@ async function main() {
   // ─── STEP 4: ASSEMBLY ───
   if (RUN_STEP === null || RUN_STEP === 4) stepBanner(4, 'ASSEMBLY');
   const tempDir = TEMP_DIR;
-  const outputPath = path.resolve(process.cwd(), 'output', 'final_short.mp4');
+  const outputPath = path.join(OUTPUT_DIR, 'final_short.mp4');
   const audioFilePath = path.join(tempDir, 'audio.mp3');
   if (RUN_STEP === null || RUN_STEP === 4) {
     if (!fs.existsSync(audioFilePath)) {

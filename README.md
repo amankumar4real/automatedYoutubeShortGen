@@ -29,7 +29,7 @@ npx tsc && node get_topic.js
 
 ## Environment (.env)
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root (see `.env.example`):
 
 ```env
 OPENAI_API_KEY=sk-...      # Script generation (required for step 1)
@@ -37,11 +37,29 @@ ELEVEN_API_KEY=...         # Voiceover (required for step 2)
 XAI_API_KEY=...             # Only if MANUAL_GROK=false (Grok API for clips)
 ```
 
-Optional:
+For the API with auth and projects:
 
 ```env
-BACKGROUND_MUSIC_PATH=temp/background_music.mp3   # Override path for background music
-RUN_STEP=1                                         # Run only one step (1|2|3|4)
+MONGODB_URI=mongodb://localhost:27017   # or Atlas connection string
+MONGODB_DB_NAME=shorts
+JWT_SECRET=change-me-in-production      # use a strong secret in production
+```
+
+For R2 asset storage (optional):
+
+```env
+R2_ACCOUNT_ID=...
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET_NAME=...
+```
+
+Other optional:
+
+```env
+BACKGROUND_MUSIC_PATH=temp/background_music.mp3
+RUN_STEP=1
+PORT=4000
 ```
 
 ---
@@ -93,7 +111,7 @@ Edit `automate_shorts.ts` if you want to change defaults:
 
 ---
 
-## Running the pipeline
+## Running the pipeline (CLI)
 
 ### Full pipeline (all 4 steps)
 
@@ -127,6 +145,66 @@ RUN_STEP=4 node automate_shorts.js
 ```
 
 For step 4, script, audio, and all `clip_0.mp4` … `clip_N.mp4` must already exist in `temp/`; otherwise the script exits with a clear error.
+
+---
+
+## Backend API + Web client
+
+### Backend (API server)
+
+Start the Node backend (Express) on port 4000:
+
+```bash
+npm install
+npm run dev:server
+```
+
+This exposes:
+
+- **Auth:** `POST /api/auth/register`, `POST /api/auth/login` (username + password; JWT token).
+- **Projects (per-user):** `POST /api/projects` (create; optional `Idempotency-Key`), `GET /api/projects`, `GET /api/projects/:id`, `POST /api/projects/:id/continue`, optional `POST /api/projects/:id/clips` (multipart clip upload).
+- **Legacy jobs:** `POST /api/jobs`, `GET /api/jobs/:id`, `GET /api/jobs` (all require auth).
+- `GET /media/*` — serve generated MP4 and `youtube_meta.json` (and project media when R2 is not used).
+
+### Frontend (web client)
+
+Serve the simple web client:
+
+```bash
+npm run dev:frontend
+```
+
+Then visit the printed URL (for example `http://localhost:3000`) and set the **API base URL** field to:
+
+```text
+http://localhost:4000
+```
+
+Use the client to:
+
+- **Log in or register** (username + password); then open **My Shorts** (project list).
+- Create a new short (topic + optional test mode); open a project to see status, stage history, “Continue assembly” when waiting for clips, and the final video + YouTube metadata.
+- API base URL is stored per session; set it on the login page or on the project list.
+
+### Exposing the backend via ngrok (optional)
+
+If you want to access your local backend from another device:
+
+1. Run ngrok:
+
+   ```bash
+   ngrok http 4000
+   ```
+
+2. Ngrok will print a public HTTPS URL, e.g.:
+
+   ```text
+   https://your-subdomain.ngrok.io
+   ```
+
+3. In the web client, set **API base URL** to that ngrok URL instead of `http://localhost:4000`.
+
+All client requests will then be tunneled to your local Express backend.
 
 ---
 

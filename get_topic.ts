@@ -35,31 +35,51 @@ function ask(question: string): Promise<string> {
   });
 }
 
+function normalizeTopic(t: string): string {
+  return t
+    .toLowerCase()
+    .replace(/[^\w\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isDuplicate(newTopic: string, alreadySuggested: string[]): boolean {
+  const n = normalizeTopic(newTopic);
+  if (!n) return true;
+  return alreadySuggested.some((s) => {
+    const existing = normalizeTopic(s);
+    return existing === n || existing.includes(n) || n.includes(existing);
+  });
+}
+
 async function fetchTopics(alreadySuggested: string[] = []): Promise<string[]> {
-  const avoid = alreadySuggested.length
-    ? `Do NOT repeat or rephrase these: ${alreadySuggested.slice(0, 30).join(' | ')}.`
-    : '';
+  const avoid =
+    alreadySuggested.length > 0
+      ? `CRITICAL: The user has already seen these topics. You MUST NOT suggest any topic that is the same as or substantially similar to any of these. Suggest only brand-new topics:\n${alreadySuggested.slice(0, 80).join('\n')}`
+      : '';
+
   const res = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       {
         role: 'system',
         content:
-          'You suggest topics for 30–55 second dark, documentary-style YouTube Shorts. Reply with exactly 15 topics, one per line, no numbering, no extra text. Topics must have enough concrete events, scenes, and details to easily fill a gripping 30–55 second narration (multiple specific beats, not just "they vanished and were later found"). Avoid cases that collapse into 1–2 dull sentences. Put any that are widely discussed in true crime / mystery communities at the TOP (based on your training data).'
+          'You suggest topics for 30–55 second dark, documentary-style YouTube Shorts. Reply with exactly 15 topics, one per line, no numbering, no extra text. Put TRENDING and currently viral topics at the very top (e.g. Epstein files, major recent revelations, widely discussed documentaries or news). Then mix in: true crime, disappearances, creepy, scary, and unthinkable/crazy. Each topic must have enough concrete beats for a gripping 30–55 second narration.'
       },
       {
         role: 'user',
-        content: `Suggest 15 dark, real-life topic ideas for a 30–55 second YouTube Short. All must be: true crime, unsolved mystery, unhinged history, or scary real events. Real people and events only. Each topic must have a rich trail of specific moments (timeline, objects, locations, or decisions) so a script can escalate like a mini-story (similar in density to a Marina Abramović "Rhythm 0" style breakdown). Avoid overly broad or thin cases that can only be summarized in one or two sentences. Put trending or widely discussed ones at the top. One topic per line, format: "Short title (optional brief context)". ${avoid}`
+        content: `Suggest 15 dark, real-life topic ideas for a 30–55 second YouTube Short. Put TRENDING / viral / currently discussed topics FIRST (e.g. Epstein files, big recent news). Then include a mix: true crime, unsolved mystery, creepy, scary, unthinkable/crazy. Real people and events only. One topic per line, format: "Short title (optional brief context)". Do not suggest only murders or disappearances. ${avoid ? '\n' + avoid + '\n' : ''}`
       }
     ],
-    temperature: 0.8
+    temperature: 0.85
   });
   const text = (res.choices[0]?.message?.content ?? '').trim();
   const lines = text
     .split('\n')
     .map((l) => l.replace(/^\d+[.)]\s*/, '').trim())
     .filter((l) => l.length > 0);
-  return lines.slice(0, 15);
+  const deduped = lines.filter((line) => !isDuplicate(line, alreadySuggested));
+  return deduped.slice(0, 15);
 }
 
 async function main() {

@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Shorts Generator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #0c1222;
+        --bg-card: #111827;
+        --bg-elevated: #1a2234;
+        --border: #1e293b;
+        --border-focus: #3b82f6;
+        --text: #f1f5f9;
+        --text-muted: #94a3b8;
+        --text-dim: #64748b;
+        --accent: #6366f1;
+        --accent-hover: #4f46e5;
+        --success: #10b981;
+        --warning: #f59e0b;
+        --error: #ef4444;
+        --radius: 12px;
+        --radius-sm: 8px;
+        --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -2px rgba(0, 0, 0, 0.15);
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 15px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+      .container {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 2rem 1.5rem;
+      }
+      .page { display: none; }
+      .page.active { display: block; animation: fadeIn 0.2s ease; }
+      @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+      .card-prompts { animation: cardFadeIn 0.25s ease; }
+      @keyframes cardFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+      h1 {
+        font-size: 1.75rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0 0 0.25rem 0;
+        color: var(--text);
+      }
+      h2 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin: 0 0 0.75rem 0;
+        color: var(--text);
+      }
+      .subtitle {
+        font-size: 0.875rem;
+        color: var(--text-muted);
+        margin: 0 0 1.5rem 0;
+      }
+      .card {
+        background: var(--bg-card);
+        border-radius: var(--radius);
+        padding: 1.5rem 1.5rem;
+        margin-bottom: 1.25rem;
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        transition: opacity 0.2s ease, transform 0.15s ease;
+      }
+      .card:hover { border-color: #334155; }
+      button { transition: background 0.15s, border-color 0.15s, transform 0.05s; }
+      button:hover:not([disabled]) { transform: translateY(-1px); }
+      button:active { transform: scale(0.98); }
+      .card-header {
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-dim);
+        margin-bottom: 0.75rem;
+      }
+      label {
+        display: block;
+        font-size: 0.875rem;
+        font-weight: 500;
+        margin-bottom: 0.35rem;
+        color: var(--text-muted);
+      }
+      input[type='text'],
+      input[type='password'] {
+        width: 100%;
+        padding: 0.6rem 0.85rem;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 0.9375rem;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      input[type='text']:focus,
+      input[type='password']:focus {
+        outline: none;
+        border-color: var(--border-focus);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+      }
+      input[type='text']::placeholder,
+      input[type='password']::placeholder {
+        color: var(--text-dim);
+      }
+      input[type='checkbox'] {
+        margin-right: 0.5rem;
+        accent-color: var(--accent);
+      }
+      button {
+        padding: 0.6rem 1.15rem;
+        border-radius: var(--radius-sm);
+        border: none;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        transition: background 0.15s, transform 0.05s;
+      }
+      button[disabled] { opacity: 0.55; cursor: not-allowed; }
+      button.primary {
+        background: var(--accent);
+        color: white;
+      }
+      button.primary:hover:not([disabled]) { background: var(--accent-hover); }
+      button.secondary {
+        background: var(--bg-elevated);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      button.secondary:hover:not([disabled]) {
+        background: #243049;
+        border-color: #334155;
+      }
+      button.danger {
+        background: var(--error);
+        color: white;
+      }
+      button.danger:hover:not([disabled]) { background: #dc2626; filter: brightness(1.05); }
+      .prompt-block { font-size: 0.875rem; color: var(--text-muted); white-space: pre-wrap; word-break: break-word; padding: 0.75rem; background: var(--bg); border-radius: var(--radius-sm); border: 1px solid var(--border); }
+      .scene-prompt { margin-bottom: 1rem; }
+      .scene-prompt .scene-num { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 0.35rem; }
+      .status {
+        font-family: ui-monospace, monospace;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+      }
+      .pill {
+        display: inline-block;
+        padding: 0.25rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .pill-draft, .pill-queued { background: rgba(100, 116, 139, 0.25); color: #cbd5e1; }
+      .pill-running, .pill-script_generated, .pill-audio_generated { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+      .pill-done, .pill-assembly_done { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+      .pill-error { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+      .pill-waiting_for_clips { background: rgba(234, 179, 8, 0.2); color: #facc15; }
+      video {
+        width: 100%;
+        max-width: 360px;
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        background: #000;
+      }
+      textarea {
+        width: 100%;
+        min-height: 96px;
+        padding: 0.6rem 0.85rem;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 0.875rem;
+        resize: vertical;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      textarea:focus {
+        outline: none;
+        border-color: var(--border-focus);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+      }
+      .row { display: flex; gap: 1rem; flex-wrap: wrap; }
+      .grow { flex: 1 1 0; min-width: 0; }
+      .small { font-size: 0.8125rem; color: var(--text-muted); }
+      .copy-btn, .chip {
+        background: var(--bg-elevated);
+        border-radius: 999px;
+        padding: 0.35rem 0.85rem;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        border: 1px solid var(--border);
+        color: var(--text);
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .copy-btn:hover, .chip:hover { background: #243049; border-color: #334155; }
+      .chip { margin: 0.25rem 0.25rem 0.25rem 0; }
+      .chip.selected { border-color: var(--accent); background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
+      #topicSuggestions { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.5rem; }
+      .project-list { list-style: none; padding: 0; margin: 0; }
+      .project-list li {
+        padding: 1rem 1.15rem;
+        margin-bottom: 0.5rem;
+        background: var(--bg-elevated);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .project-list li:hover {
+        background: #1e293b;
+        border-color: #334155;
+      }
+      .stage-history { font-size: 0.8125rem; color: var(--text-muted); margin-top: 0.75rem; }
+      .stage-history div { margin: 0.25rem 0; }
+      .link {
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 0.875rem;
+        transition: color 0.15s;
+      }
+      .link:hover { color: var(--text); }
+      .err { color: #f87171; font-size: 0.8125rem; margin-top: 0.5rem; }
+      .login-wrap { max-width: 400px; }
+      .btn-group { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+      .nav-back { display: inline-flex; align-items: center; gap: 0.35rem; }
+      .detail-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem; }
+      button.danger {
+        background: var(--error);
+        color: white;
+      }
+      button.danger:hover:not([disabled]) { background: #dc2626; filter: brightness(1.05); }
+      .prompt-block { font-size: 0.875rem; color: var(--text-muted); white-space: pre-wrap; word-break: break-word; padding: 0.75rem; background: var(--bg); border-radius: var(--radius-sm); border: 1px solid var(--border); }
+      .scene-prompt { margin-bottom: 1rem; }
+      .scene-prompt .scene-num { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 0.35rem; }
+      .waiting-box {
+        margin-top: 1rem;
+        padding: 1rem 1.15rem;
+        background: var(--bg-elevated);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+      }
+      .waiting-box .small { margin-bottom: 0.5rem; }
+      code { font-size: 0.8em; background: var(--bg); padding: 0.15rem 0.4rem; border-radius: 4px; color: var(--text-muted); }
+      input[type="file"] {
+        font-size: 0.8125rem;
+        color: var(--text-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div id="pageLogin" class="page">
+        <h1>Shorts Generator</h1>
+        <p class="subtitle">Sign in or create an account to manage your shorts.</p>
+        <div class="card login-wrap">
+          <div class="card-header">API &amp; account</div>
+          <div style="margin-bottom: 1rem">
+            <label for="apiBaseAuth">API base URL</label>
+            <input id="apiBaseAuth" type="text" value="http://localhost:4000" placeholder="http://localhost:4000" />
+          </div>
+          <div style="margin-bottom: 1rem">
+            <label for="authUsername">Username</label>
+            <input id="authUsername" type="text" autocomplete="username" placeholder="Your username" />
+          </div>
+          <div style="margin-bottom: 1.25rem">
+            <label for="authPassword">Password</label>
+            <input id="authPassword" type="password" autocomplete="current-password" placeholder="••••••••" />
+          </div>
+          <div class="btn-group">
+            <button id="btnLogin" class="primary">Log in</button>
+            <button id="btnRegister" class="secondary">Register</button>
+          </div>
+          <div id="authError" class="err"></div>
+        </div>
+      </div>
+
+      <div id="pageProjects" class="page">
+        <div class="row" style="align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 1.5rem;">
+          <div>
+            <h1>My Shorts</h1>
+            <p class="subtitle" style="margin: 0;">Logged in as <strong id="userName"></strong>. <a href="#" id="linkLogout" class="link">Log out</a></p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">New short</div>
+          <label for="apiBase">API base URL</label>
+          <input id="apiBase" type="text" value="http://localhost:4000" style="margin-bottom: 1rem;" />
+          <div class="row" style="margin-bottom: 1rem;">
+            <div class="grow">
+              <label for="topic">Topic</label>
+              <input id="topic" type="text" placeholder="e.g. The Beast of Gévaudan" />
+              <div id="topicSuggestions" class="small"></div>
+            </div>
+            <div style="display: flex; flex-direction: column; justify-content: flex-end; min-width: 140px;">
+              <button id="btnSuggestTopic" type="button" class="secondary">Suggest topic</button>
+            </div>
+          </div>
+          <button id="btnNewProject" type="button" class="primary">Create new short</button>
+        </div>
+        <div class="card">
+          <div class="card-header">Your projects</div>
+          <ul id="projectList" class="project-list"></ul>
+          <div id="projectListEmpty" class="small" style="display: none;">No projects yet. Create one above.</div>
+        </div>
+      </div>
+
+      <div id="pageProjectDetail" class="page">
+        <div class="detail-header">
+          <a href="#/projects" id="backToProjects" class="link nav-back">← Back to projects</a>
+          <button type="button" id="btnDeleteProject" class="danger" style="display: none;">Delete project</button>
+        </div>
+        <h1 id="detailTopic">Project</h1>
+        <div class="card card-status" id="detailStatusCard">
+          <div class="card-header">Status</div>
+          <div class="row" style="align-items: center; margin-bottom: 0.5rem">
+            <div class="grow">
+              <div class="small">Project ID</div>
+              <div id="detailProjectId" class="status"></div>
+            </div>
+            <span id="detailStatusPill" class="pill pill-draft">draft</span>
+          </div>
+          <div id="detailError" class="err"></div>
+          <div id="detailStageHistory" class="stage-history"></div>
+          <div id="waitingForClipsBox" class="waiting-box" style="display: none;">
+            <div class="small">
+              Add these files, then <strong>Upload clips</strong> and <strong>Continue assembly</strong>.
+              Name files <code>clip_0.mp4</code>, <code>clip_1.mp4</code>, etc.
+            </div>
+            <ul id="requiredFilesList" class="small" style="margin: 0.5rem 0; padding-left: 1.25rem"></ul>
+            <div class="row" style="align-items: center; margin-top: 0.75rem; gap: 0.5rem;">
+              <input id="clipFiles" type="file" multiple accept="video/mp4" />
+              <button id="uploadClipsBtn" type="button" class="secondary">Upload clips</button>
+              <button id="continueBtn" type="button" class="primary">Continue assembly</button>
+            </div>
+          </div>
+        </div>
+        <div class="card card-prompts" id="promptsCard" style="display: none;">
+          <div class="card-header">Video prompts</div>
+          <div id="promptsLoading" class="small" style="display: none;">Loading prompts…</div>
+          <div id="promptsError" class="small err" style="display: none;"></div>
+          <div id="promptsContent" style="display: none;">
+            <div id="promptsVoiceoverWrap" style="margin-bottom: 1rem;">
+              <button type="button" class="secondary small" id="toggleVoiceover" aria-expanded="false">Show full voiceover</button>
+              <div id="promptsVoiceover" class="prompt-block" style="display: none; margin-top: 0.5rem;"></div>
+            </div>
+            <div id="promptsScenes"></div>
+          </div>
+        </div>
+        <div class="card" id="resultCard" style="display: none">
+          <div class="card-header">Result</div>
+          <div class="row" style="margin-top: 0; gap: 1.25rem;">
+            <div>
+              <video id="video" controls playsinline></video>
+            </div>
+            <div class="grow">
+              <div style="margin-bottom: 0.75rem">
+                <label for="title">Title</label>
+                <div class="row" style="align-items: center; margin-bottom: 0.25rem; gap: 0.5rem;">
+                  <input id="title" type="text" class="grow" />
+                  <button class="copy-btn" data-copy-target="title">Copy</button>
+                </div>
+              </div>
+              <div style="margin-bottom: 0.75rem">
+                <label for="description">Description</label>
+                <div class="row" style="align-items: flex-start; margin-bottom: 0.25rem; gap: 0.5rem;">
+                  <textarea id="description" class="grow"></textarea>
+                  <button class="copy-btn" data-copy-target="description">Copy</button>
+                </div>
+              </div>
+              <div>
+                <label for="tags">Tags (comma separated)</label>
+                <div class="row" style="align-items: flex-start; margin-bottom: 0.25rem; gap: 0.5rem;">
+                  <textarea id="tags" class="grow"></textarea>
+                  <button class="copy-btn" data-copy-target="tags">Copy</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const AUTH_TOKEN_KEY = 'shorts_token';
+      const API_BASE_KEY = 'shorts_api_base';
+      const USER_NAME_KEY = 'shorts_username';
+
+      function getToken() { return localStorage.getItem(AUTH_TOKEN_KEY); }
+      function setToken(t) { if (t) localStorage.setItem(AUTH_TOKEN_KEY, t); else localStorage.removeItem(AUTH_TOKEN_KEY); }
+      function setUserName(u) { if (u) localStorage.setItem(USER_NAME_KEY, u); else localStorage.removeItem(USER_NAME_KEY); }
+      function getUserName() { return localStorage.getItem(USER_NAME_KEY) || ''; }
+      function getApiBase() { return (localStorage.getItem(API_BASE_KEY) || 'http://localhost:4000').replace(/\/$/, ''); }
+      function setApiBase(b) { localStorage.setItem(API_BASE_KEY, (b || '').replace(/\/$/, '')); }
+
+      // In-memory topic suggestion state for the current session
+      let suggestedTopics = [];
+      let seenTopics = [];
+
+      function normalizeTopic(t) {
+        return (t || '').toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+      }
+      function isAlreadySeen(topic, seen) {
+        var n = normalizeTopic(topic);
+        if (!n) return true;
+        return seen.some(function(s) {
+          var e = normalizeTopic(s);
+          return e === n || e.indexOf(n) !== -1 || n.indexOf(e) !== -1;
+        });
+      }
+
+      function authFetch(url, opts = {}) {
+        const base = getApiBase();
+        const fullUrl = url.startsWith('http') ? url : base + url;
+        const headers = { ...(opts.headers || {}) };
+        if (opts.body && typeof opts.body === 'string' && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+        const token = getToken();
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        return fetch(fullUrl, { ...opts, headers }).then((res) => {
+          if (res.status === 401) {
+            setToken(null);
+            window.location.hash = '#/login';
+            throw new Error('Unauthorized');
+          }
+          return res;
+        });
+      }
+
+      function showPage(id) {
+        document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'));
+        const el = document.getElementById(id);
+        if (el) el.classList.add('active');
+      }
+
+      function setStatusPill(el, status) {
+        if (!el) return;
+        el.textContent = (status || '').toString().replace(/_/g, ' ');
+        el.className = 'pill ' + ({
+          draft: 'pill-draft', script_generated: 'pill-script_generated', audio_generated: 'pill-audio_generated',
+          waiting_for_clips: 'pill-waiting_for_clips', assembly_done: 'pill-assembly_done', error: 'pill-error'
+        }[status] || 'pill-draft');
+      }
+
+      function renderProjectList(projects) {
+        const list = document.getElementById('projectList');
+        const empty = document.getElementById('projectListEmpty');
+        if (!list) return;
+        list.innerHTML = '';
+        if (!projects || !projects.length) {
+          if (empty) empty.style.display = 'block';
+          return;
+        }
+        if (empty) empty.style.display = 'none';
+        projects.forEach((p) => {
+          const li = document.createElement('li');
+          const pillClass = p.status === 'assembly_done' ? 'pill-assembly_done' : p.status === 'waiting_for_clips' ? 'pill-waiting_for_clips' : p.status === 'error' ? 'pill-error' : 'pill-draft';
+          const updated = p.updatedAt ? new Date(p.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+          li.innerHTML = '<div><div style="font-weight: 600;">' + (p.topic || 'Untitled').replace(/</g, '&lt;') + '</div><div class="small">' + updated + '</div></div><span class="pill ' + pillClass + '">' + (p.status || 'draft').replace(/_/g, ' ') + '</span>';
+          li.onclick = () => { window.location.hash = '#/projects/' + p.projectId; };
+          list.appendChild(li);
+        });
+      }
+
+      function applyRoute() {
+        const rawHash = (window.location.hash || '#/').slice(1);
+        const hash = rawHash.replace(/^\/+/, '');
+        const token = getToken();
+        if (!token && hash !== 'login' && hash !== '') {
+          window.location.hash = '#/login';
+          showPage('pageLogin');
+          return;
+        }
+        if (hash === 'login' || hash === '') {
+          if (token) {
+            window.location.hash = '#/projects';
+            loadProjectsPage();
+          } else {
+            showPage('pageLogin');
+          }
+          return;
+        }
+        if (hash === 'projects') {
+          if (detailPollTimer) { clearInterval(detailPollTimer); detailPollTimer = null; }
+          showPage('pageProjects');
+          loadProjectsPage();
+          return;
+        }
+        const match = hash.match(/^projects\/([^/]+)$/);
+        if (match) {
+          showPage('pageProjectDetail');
+          loadProjectDetail(match[1]);
+          return;
+        }
+        showPage('pageProjects');
+        loadProjectsPage();
+      }
+
+      async function loadProjectsPage() {
+        const userName = document.getElementById('userName');
+        if (userName) userName.textContent = getUserName() || '(user)';
+        try {
+          const res = await authFetch('/api/projects');
+          if (!res.ok) throw new Error('Failed to load projects');
+          const projects = await res.json();
+          renderProjectList(projects);
+        } catch (e) {
+          if (e.message !== 'Unauthorized') renderProjectList([]);
+        }
+      }
+
+      let currentProjectId = null;
+      let detailPollTimer = null;
+
+      async function loadProjectScript(projectId) {
+        const loadingEl = document.getElementById('promptsLoading');
+        const errorEl = document.getElementById('promptsError');
+        const contentEl = document.getElementById('promptsContent');
+        const voiceoverWrap = document.getElementById('promptsVoiceoverWrap');
+        const voiceoverEl = document.getElementById('promptsVoiceover');
+        const scenesEl = document.getElementById('promptsScenes');
+        const toggleBtn = document.getElementById('toggleVoiceover');
+        if (loadingEl) loadingEl.style.display = 'block';
+        if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+        if (contentEl) contentEl.style.display = 'none';
+        try {
+          const res = await authFetch('/api/projects/' + encodeURIComponent(projectId) + '/script');
+          if (currentProjectId !== projectId) return;
+          if (!res.ok) {
+            if (errorEl) { errorEl.textContent = 'Prompts will appear after script is generated.'; errorEl.style.display = 'block'; }
+            return;
+          }
+          const script = await res.json();
+          if (!script || !Array.isArray(script.scenes)) {
+            if (errorEl) { errorEl.textContent = 'Prompts will appear after script is generated.'; errorEl.style.display = 'block'; }
+            return;
+          }
+          if (loadingEl) loadingEl.style.display = 'none';
+          if (contentEl) contentEl.style.display = 'block';
+          if (script.voiceover && voiceoverEl) {
+            voiceoverEl.textContent = script.voiceover;
+            if (voiceoverWrap) voiceoverWrap.style.display = 'block';
+          } else if (voiceoverWrap) voiceoverWrap.style.display = 'none';
+          if (scenesEl) {
+            scenesEl.innerHTML = script.scenes.map(function(s, i) {
+              var sceneVo = s.voiceover ? '<div class="small" style="margin-top:0.35rem;color:var(--text-dim);">' + String(s.voiceover).replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>' : '';
+              return '<div class="scene-prompt"><div class="scene-num">Scene ' + (i + 1) + '</div><div class="prompt-block">' + String(s.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>' + sceneVo + '</div>';
+            }).join('');
+          }
+          if (toggleBtn) {
+            toggleBtn.setAttribute('aria-expanded', 'false');
+            toggleBtn.textContent = 'Show full voiceover';
+          }
+          if (voiceoverEl) voiceoverEl.style.display = 'none';
+        } catch (e) {
+          if (currentProjectId !== projectId) return;
+          if (loadingEl) loadingEl.style.display = 'none';
+          if (errorEl) { errorEl.textContent = 'Prompts will appear after script is generated.'; errorEl.style.display = 'block'; }
+        }
+      }
+
+      async function loadProjectDetail(projectId) {
+        currentProjectId = projectId;
+        if (detailPollTimer) clearInterval(detailPollTimer);
+        const statusCard = document.getElementById('detailStatusCard');
+        const resultCard = document.getElementById('resultCard');
+        const topicEl = document.getElementById('detailTopic');
+        const projectIdEl = document.getElementById('detailProjectId');
+        const statusPill = document.getElementById('detailStatusPill');
+        const errorEl = document.getElementById('detailError');
+        const stageHistoryEl = document.getElementById('detailStageHistory');
+        const waitingBox = document.getElementById('waitingForClipsBox');
+        const requiredList = document.getElementById('requiredFilesList');
+        if (topicEl) topicEl.textContent = 'Loading…';
+        if (statusCard) statusCard.style.display = 'block';
+        if (resultCard) resultCard.style.display = 'none';
+
+        function apply(data) {
+          if (!data) return;
+          if (topicEl) topicEl.textContent = data.topic || 'Project';
+          if (projectIdEl) projectIdEl.textContent = data.projectId || projectId;
+          setStatusPill(statusPill, data.status);
+          const showPrompts = ['script_generated', 'audio_generated', 'waiting_for_clips', 'assembly_done', 'error'].indexOf(data.status) !== -1;
+          const promptsCardEl = document.getElementById('promptsCard');
+          const btnDelete = document.getElementById('btnDeleteProject');
+          if (btnDelete) btnDelete.style.display = 'inline-flex';
+          if (promptsCardEl) promptsCardEl.style.display = showPrompts ? 'block' : 'none';
+          if (showPrompts) loadProjectScript(projectId);
+          if (data.status === 'assembly_done' || data.status === 'error') {
+            if (detailPollTimer) {
+              clearInterval(detailPollTimer);
+              detailPollTimer = null;
+            }
+          }
+          if (errorEl) errorEl.textContent = data.errorMessage || '';
+          if (stageHistoryEl) {
+            const hist = data.stageHistory || [];
+            stageHistoryEl.innerHTML = hist.length ? hist.map((h) => '<div>' + (h.stage || '') + ': ' + (h.status || '') + (h.at ? ' @ ' + h.at : '') + '</div>').join('') : '';
+          }
+          if (data.status === 'waiting_for_clips') {
+            if (waitingBox) waitingBox.style.display = 'block';
+            if (requiredList) requiredList.innerHTML = (data.requiredFiles || []).map((f) => '<li>' + f + '</li>').join('');
+          } else {
+            if (waitingBox) waitingBox.style.display = 'none';
+          }
+          var videoEl = document.getElementById('video');
+          var titleEl = document.getElementById('title');
+          var descEl = document.getElementById('description');
+          var tagsEl = document.getElementById('tags');
+          if (videoEl) videoEl.removeAttribute('src');
+          if (titleEl) titleEl.value = '';
+          if (descEl) descEl.value = '';
+          if (tagsEl) tagsEl.value = '';
+          if (data.status === 'assembly_done') {
+            if (resultCard) resultCard.style.display = 'block';
+            if (videoEl && data.finalVideoUrl) {
+              videoEl.src = data.finalVideoUrl.startsWith('http') ? data.finalVideoUrl : getApiBase() + data.finalVideoUrl;
+            }
+            authFetch('/api/projects/' + encodeURIComponent(projectId) + '/meta')
+              .then(function(r) {
+                if (!r.ok) return null;
+                return r.json();
+              })
+              .then(function(meta) {
+                if (!meta) return;
+                if (currentProjectId !== projectId) return;
+                var t = document.getElementById('title');
+                var d = document.getElementById('description');
+                var g = document.getElementById('tags');
+                if (t) t.value = (meta.titles && meta.titles[0]) || '';
+                if (d) d.value = meta.description || '';
+                if (g) g.value = (meta.tags || []).join(', ');
+              })
+              .catch(function() {});
+          } else {
+            if (resultCard) resultCard.style.display = 'none';
+          }
+        }
+
+        try {
+          const res = await authFetch('/api/projects/' + encodeURIComponent(projectId));
+          if (!res.ok) throw new Error('Project not found');
+          const data = await res.json();
+          apply(data);
+          detailPollTimer = setInterval(async () => {
+            if (currentProjectId !== projectId) return;
+            try {
+              const r = await authFetch('/api/projects/' + encodeURIComponent(projectId));
+              if (r.ok) apply(await r.json());
+            } catch (_) {}
+          }, 4000);
+        } catch (e) {
+          if (errorEl) errorEl.textContent = e.message || 'Failed to load project';
+        }
+      }
+
+      window.addEventListener('hashchange', applyRoute);
+      window.addEventListener('load', () => {
+        document.getElementById('apiBaseAuth').value = getApiBase();
+        document.getElementById('apiBase').value = getApiBase();
+        document.getElementById('apiBase').addEventListener('change', function() { setApiBase(this.value); });
+        document.getElementById('apiBaseAuth').addEventListener('change', function() { setApiBase(this.value); });
+
+        document.getElementById('btnLogin').onclick = async () => {
+          const base = document.getElementById('apiBaseAuth').value.trim();
+          const username = document.getElementById('authUsername').value.trim();
+          const password = document.getElementById('authPassword').value;
+          document.getElementById('authError').textContent = '';
+          if (!base || !username || !password) {
+            document.getElementById('authError').textContent = 'Fill API URL, username and password.';
+            return;
+          }
+          setApiBase(base);
+          try {
+            const res = await fetch((base.replace(/\/$/, '')) + '/api/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username, password })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Login failed');
+            setToken(data.token);
+            if (data.user && data.user.username) setUserName(data.user.username);
+            window.location.hash = '#/projects';
+          } catch (e) {
+            document.getElementById('authError').textContent = e.message || 'Login failed';
+          }
+        };
+
+        document.getElementById('btnRegister').onclick = async () => {
+          const base = document.getElementById('apiBaseAuth').value.trim();
+          const username = document.getElementById('authUsername').value.trim();
+          const password = document.getElementById('authPassword').value;
+          document.getElementById('authError').textContent = '';
+          if (!base || !username || !password) {
+            document.getElementById('authError').textContent = 'Fill API URL, username and password.';
+            return;
+          }
+          setApiBase(base);
+          try {
+            const res = await fetch((base.replace(/\/$/, '')) + '/api/auth/register', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username, password })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Register failed');
+            setToken(data.token);
+            if (data.user && data.user.username) setUserName(data.user.username);
+            window.location.hash = '#/projects';
+          } catch (e) {
+            document.getElementById('authError').textContent = e.message || 'Register failed';
+          }
+        };
+
+        document.getElementById('linkLogout').onclick = (e) => {
+          e.preventDefault();
+          setToken(null);
+          setUserName(null);
+          window.location.hash = '#/login';
+        };
+
+        const suggestBtn = document.getElementById('btnSuggestTopic');
+        const topicInput = document.getElementById('topic');
+        const topicSuggestionsEl = document.getElementById('topicSuggestions');
+
+        if (suggestBtn && topicInput && topicSuggestionsEl) {
+          suggestBtn.onclick = async () => {
+            suggestBtn.disabled = true;
+            const originalText = suggestBtn.textContent;
+            suggestBtn.textContent = 'Fetching…';
+            topicSuggestionsEl.textContent = '';
+            try {
+              const res = await authFetch('/api/topics/suggest', {
+                method: 'POST',
+                body: JSON.stringify({ previous: seenTopics })
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok || !data.topics || !Array.isArray(data.topics)) {
+                throw new Error(data.error || 'No topics available');
+              }
+              var newOnes = data.topics.filter(function(t) { return !isAlreadySeen(t, seenTopics); });
+              suggestedTopics = newOnes;
+              seenTopics = seenTopics.concat(newOnes);
+              topicInput.value = suggestedTopics[0] || topicInput.value || '';
+              if (!newOnes.length) {
+                topicSuggestionsEl.textContent = 'No new topics this batch (all were already suggested). Click again for more.';
+              } else {
+                topicSuggestionsEl.innerHTML = suggestedTopics
+                  .map(function(t, idx) {
+                    var cls = 'chip' + (idx === 0 ? ' selected' : '');
+                    return '<button type="button" class="' + cls + '" data-idx="' + idx + '">' + t.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') + '</button>';
+                  })
+                  .join('');
+                topicSuggestionsEl.querySelectorAll('button[data-idx]').forEach(function(btn) {
+                  btn.addEventListener('click', function() {
+                    var i = parseInt(btn.getAttribute('data-idx'), 10);
+                    if (isNaN(i) || !suggestedTopics[i]) return;
+                    topicInput.value = suggestedTopics[i];
+                    topicSuggestionsEl.querySelectorAll('.chip').forEach(function(c) { c.classList.remove('selected'); });
+                    btn.classList.add('selected');
+                  });
+                });
+              }
+            } catch (e) {
+              topicSuggestionsEl.textContent = (e && e.message) || 'Topic suggestion failed';
+            } finally {
+              suggestBtn.disabled = false;
+              suggestBtn.textContent = originalText;
+            }
+          };
+        }
+
+        document.getElementById('btnNewProject').onclick = async () => {
+          const topic = document.getElementById('topic').value.trim();
+          if (!topic) { alert('Enter a topic'); return; }
+          const btn = document.getElementById('btnNewProject');
+          btn.disabled = true;
+          try {
+            const res = await authFetch('/api/projects', {
+              method: 'POST',
+              body: JSON.stringify({ topic })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Failed to create project');
+            window.location.hash = '#/projects/' + data.projectId;
+          } catch (e) {
+            alert(e.message || 'Failed to create project');
+          } finally {
+            btn.disabled = false;
+          }
+        };
+
+        document.getElementById('uploadClipsBtn').onclick = async () => {
+          if (!currentProjectId) return;
+          const input = document.getElementById('clipFiles');
+          const files = input && input.files ? input.files : null;
+          if (!files || !files.length) { alert('Select one or more clip_*.mp4 files first.'); return; }
+          const btn = document.getElementById('uploadClipsBtn');
+          btn.disabled = true;
+          btn.textContent = 'Uploading…';
+          try {
+            const form = new FormData();
+            for (let i = 0; i < files.length; i++) {
+              form.append('file' + i, files[i]);
+            }
+            const res = await authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/clips', {
+              method: 'POST',
+              body: form
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Upload failed');
+            alert('Clips uploaded. You can now click Continue to assemble.');
+            loadProjectDetail(currentProjectId);
+          } catch (e) {
+            alert(e.message || 'Upload failed');
+          } finally {
+            btn.disabled = false;
+            btn.textContent = 'Upload clips';
+          }
+        };
+
+        document.getElementById('continueBtn').onclick = async () => {
+          if (!currentProjectId) return;
+          const btn = document.getElementById('continueBtn');
+          btn.disabled = true;
+          btn.textContent = 'Running…';
+          try {
+            const res = await authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/continue', { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Continue failed');
+            loadProjectDetail(currentProjectId);
+          } catch (e) {
+            alert(e.message || 'Continue failed');
+          } finally {
+            btn.disabled = false;
+            btn.textContent = 'Continue assembly';
+          }
+        };
+
+        document.getElementById('toggleVoiceover')?.addEventListener('click', function() {
+          const expanded = this.getAttribute('aria-expanded') === 'true';
+          const voiceoverEl = document.getElementById('promptsVoiceover');
+          this.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+          this.textContent = expanded ? 'Show full voiceover' : 'Hide full voiceover';
+          if (voiceoverEl) voiceoverEl.style.display = expanded ? 'none' : 'block';
+        });
+
+        document.getElementById('btnDeleteProject')?.addEventListener('click', async () => {
+          if (!currentProjectId) return;
+          if (!confirm('Delete this project? All data will be removed. This cannot be undone.')) return;
+          const btn = document.getElementById('btnDeleteProject');
+          if (btn) btn.disabled = true;
+          try {
+            const res = await authFetch('/api/projects/' + encodeURIComponent(currentProjectId), { method: 'DELETE' });
+            if (!res.ok) throw new Error('Delete failed');
+            window.location.hash = '#/projects';
+            loadProjectsPage();
+          } catch (e) {
+            alert(e.message || 'Delete failed');
+          } finally {
+            if (btn) btn.disabled = false;
+          }
+        });
+
+        document.querySelectorAll('.copy-btn').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-copy-target');
+            const el = document.getElementById(targetId);
+            if (!el) return;
+            navigator.clipboard.writeText(el.value || '').then(() => {
+              btn.textContent = 'Copied';
+              setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+            }).catch(() => alert('Copy failed'));
+          });
+        });
+
+        applyRoute();
+      });
+    </script>
+  </body>
+</html>

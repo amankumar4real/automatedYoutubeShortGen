@@ -7,6 +7,6 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["automate_shorts.ts","get_topic.ts"],
+  "include": ["automate_shorts.ts","get_topic.ts","backend/**/*.ts"],
   "exclude": ["node_modules"]
 }
