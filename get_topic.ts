@@ -45,11 +45,11 @@ async function fetchTopics(alreadySuggested: string[] = []): Promise<string[]> {
       {
         role: 'system',
         content:
-          'You suggest topics for short-form documentary / story videos. Reply with exactly 15 topics, one per line, no numbering, no extra text. Put any that are currently trending or widely discussed in true crime/mystery communities at the TOP (you may not have real-time data; use what is commonly searched or talked about).'
+          'You suggest topics for 30–55 second dark, documentary-style YouTube Shorts. Reply with exactly 15 topics, one per line, no numbering, no extra text. Topics must have enough concrete events, scenes, and details to easily fill a gripping 30–55 second narration (multiple specific beats, not just "they vanished and were later found"). Avoid cases that collapse into 1–2 dull sentences. Put any that are widely discussed in true crime / mystery communities at the TOP (based on your training data).'
       },
       {
         role: 'user',
-        content: `Suggest 15 dark, real-life topic ideas for a YouTube Short. All must be: true crime, unsolved mystery, unhinged history, or scary real events. Real people and events only. Put trending or widely discussed ones at the top. One topic per line, format: "Short title (optional brief context)". ${avoid}`
+        content: `Suggest 15 dark, real-life topic ideas for a 30–55 second YouTube Short. All must be: true crime, unsolved mystery, unhinged history, or scary real events. Real people and events only. Each topic must have a rich trail of specific moments (timeline, objects, locations, or decisions) so a script can escalate like a mini-story (similar in density to a Marina Abramović "Rhythm 0" style breakdown). Avoid overly broad or thin cases that can only be summarized in one or two sentences. Put trending or widely discussed ones at the top. One topic per line, format: "Short title (optional brief context)". ${avoid}`
       }
     ],
     temperature: 0.8

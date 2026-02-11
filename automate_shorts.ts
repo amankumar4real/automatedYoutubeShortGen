@@ -84,6 +84,10 @@ function savePreviousOutputAndClearTemp(): void {
       fs.unlinkSync(path.join(TEMP_DIR, n));
       log('MAIN', `Removed ${n}`);
     });
+    names.filter((n) => n.startsWith('trimmed_') && n.endsWith('.mp4')).forEach((n) => {
+      fs.unlinkSync(path.join(TEMP_DIR, n));
+      log('MAIN', `Removed ${n}`);
+    });
   } catch {
     /* ignore */
   }
@@ -98,6 +102,53 @@ function getAudioDurationSeconds(audioPath: string): Promise<number> {
       resolve(typeof dur === 'number' && dur > 0 ? dur : 0);
     });
   });
+}
+
+function getVideoDurationSeconds(videoPath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(videoPath, (err, data) => {
+      if (err) return reject(err);
+      const dur = data?.format?.duration;
+      resolve(typeof dur === 'number' && dur > 0 ? dur : 0);
+    });
+  });
+}
+
+const SCENE_DURATION_DEFAULT = 5;
+
+// Trim or pad each clip to the script's per-scene duration so clip boundaries align with narration beats.
+async function prepareClipsToSceneDurations(
+  tempDir: string,
+  scenes: Array<{ prompt: string; duration?: number }>
+): Promise<string[]> {
+  const trimmedPaths: string[] = [];
+  for (let i = 0; i < scenes.length; i++) {
+    const audioScenePath = path.join(tempDir, `audio_scene_${i}.mp3`);
+    const targetSec = fs.existsSync(audioScenePath)
+      ? await getAudioDurationSeconds(audioScenePath)
+      : (scenes[i].duration ?? SCENE_DURATION_DEFAULT);
+    const clipPath = path.join(tempDir, `clip_${i}.mp4`);
+    const outPath = path.join(tempDir, `trimmed_${i}.mp4`);
+    const dur = await getVideoDurationSeconds(clipPath);
+    const padSec = Math.max(0, targetSec - Math.min(dur, targetSec));
+    const vf =
+      padSec > 0
+        ? `trim=duration=${targetSec},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${padSec.toFixed(3)}`
+        : `trim=duration=${targetSec},setpts=PTS-STARTPTS`;
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg(clipPath)
+        .noAudio()
+        .videoFilters(vf)
+        .outputOptions(['-c:v libx264', '-pix_fmt yuv420p'])
+        .output(outPath)
+        .on('start', () => log('FFMPEG', `Clip ${i}: trim/pad to ${targetSec}s (was ${dur.toFixed(1)}s)`))
+        .on('end', () => resolve())
+        .on('error', (err: Error) => reject(err))
+        .run();
+    });
+    trimmedPaths.push(outPath);
+  }
+  return trimmedPaths;
 }
 
 // --- Safeguards: validate before using APIs ---
@@ -121,7 +172,18 @@ function validateTopic(topic: string): void {
   }
 }
 
-type ScriptData = { voiceover: string; scenes: Array<{ prompt: string; duration?: number }> };
+type ScriptData = {
+  voiceover: string;
+  scenes: Array<{
+    prompt: string;
+    duration?: number;
+    /**
+     * Narration lines that should play over this visual scene.
+     * When all scene voiceovers are concatenated in order, they should roughly match the full `voiceover` above.
+     */
+    voiceover?: string;
+  }>;
+};
 function validateScriptData(data: unknown): data is ScriptData {
   if (!data || typeof data !== 'object') return false;
   const d = data as Record<string, unknown>;
@@ -158,31 +220,112 @@ function loadScriptFromTemp(): ScriptData {
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 const eleven = new ElevenLabsClient({ apiKey: ELEVEN_KEY });
 
+async function generateYouTubeMetadata(topic: string, scriptData: ScriptData) {
+  validateApiKeysForStep('script');
+  log('YT_META', 'Generating YouTube titles, description, and tags');
+
+  const metaPrompt = `
+You are an expert YouTube Shorts strategist writing for dark, mysterious, gripping documentary-style shorts.
+
+Video topic: "${topic}"
+
+Full narration script:
+${scriptData.voiceover}
+
+TASK:
+- Propose 20 highly clickable, curiosity-driving titles that fit the narration style (no clickbait lies).
+- Write ONE YouTube description that:
+  - Hooks in the first line.
+  - Briefly summarizes the story in 2–3 punchy sentences.
+  - Optionally adds 1–2 curiosity lines or questions at the end.
+- Provide 20–30 SEO tags (as plain strings) focused on true crime / mystery / dark art / weird history, tailored to this specific story.
+
+RETURN ONLY VALID JSON:
+{
+  "titles": ["title1", "title2", "... up to 20"],
+  "description": "single multiline description",
+  "tags": ["tag1", "tag2", "..."]
+}`;
+
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You write YouTube titles, descriptions, and tags for dark, gripping, highly watchable Shorts. Always return strict JSON without markdown or comments.'
+      },
+      { role: 'user', content: metaPrompt }
+    ],
+    response_format: { type: 'json_object' }
+  });
+
+  const content = completion.choices[0].message.content;
+  if (!content) {
+    log('YT_META', 'OpenAI returned empty metadata response');
+    return;
+  }
+
+  let parsed: { titles?: string[]; description?: string; tags?: string[] };
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    log('YT_META', 'Failed to parse metadata JSON');
+    return;
+  }
+
+  const out = {
+    titles: Array.isArray(parsed.titles) ? parsed.titles : [],
+    description: typeof parsed.description === 'string' ? parsed.description : '',
+    tags: Array.isArray(parsed.tags) ? parsed.tags : []
+  };
+
+  const metaPath = path.join(OUTPUT_DIR, 'youtube_meta.json');
+  fs.writeFileSync(metaPath, JSON.stringify(out, null, 2));
+  log('YT_META', `Wrote YouTube metadata to ${metaPath}`);
+}
+
 // 1. Generate Script & Prompts (JSON)
 async function getScript(topic: string): Promise<ScriptData> {
   validateTopic(topic);
   validateApiKeysForStep('script');
   log('SCRIPT', `Starting script generation for topic: "${topic}"`);
   const prompt = TEST_MODE
-    ? `Create a tiny 5–10 second test clip about: "${topic}". 
-       Return JSON with ONE scene only. Scene prompt must end with "9:16 aspect ratio, vertical portrait format".
-       { "voiceover": "One short sentence, under 10 words.", "scenes": [ { "prompt": "Simple visual for video AI, one scene. 9:16 aspect ratio, vertical portrait format.", "duration": 5 } ] }`
+    ? `Create a single 10 second test clip about: "${topic}".
+       Return JSON with ONE scene only.
+       - The top-level "voiceover" should contain the full 10 second narration (natural, under 40 words).
+       - The scene "voiceover" should be the same narration or a closely matching subset (1–3 sentences) that will be spoken while this scene is shown.
+       - Scene prompt must end with "9:16 aspect ratio, vertical portrait format".
+       {
+         "voiceover": "Short natural narration, under 40 words.",
+         "scenes": [
+           {
+             "prompt": "Simple visual for video AI that clearly matches the narration. 9:16 aspect ratio, vertical portrait format.",
+             "voiceover": "Lines spoken for this 10 second scene.",
+             "duration": 10
+           }
+         ]
+       }`
     : `Write a YouTube Short script about: "${topic}".
 
        STYLE (follow this closely):
        - Natural, conversational narration—like a documentary or a gripping story. No stiff or vague phrasing.
        - Open with a HOOK: a specific year or moment, a name, and what they did (e.g. "In 1974, a woman named Marina Abramović walked into a gallery to do a performance that would shock the world.").
        - Pack in CONCRETE DETAIL: real names, numbers, places, objects, and clear actions. List specific items (e.g. "72 objects, including scissors, a whip, and even a loaded gun"). Describe what actually happened in order—not "things got intense" but "in the third hour her garments were cut off by a man with a sharp blade."
-       - Build chronologically or by clear beats. End with a short punchy line that sticks (e.g. "still remains a controversial and thought-provoking piece").
+       - Build chronologically or by clear beats. The story should ESCALATE: start with a simple hook, then reveal increasingly intense or strange details, ending on a sharp, memorable line.
+       - Focus on 1–3 very specific, vivid moments or actions, not just a summary. Like in this example (DO NOT copy, only imitate the style):
+         "In 1974, a woman named Marina Abramović walked into a gallery, to do a performance that would shock the world. Known as 'Rhythm 0' Abramović invited participants to do anything they desired to her for 6 hours using 72 objects, including scissors, a whip, and even a loaded gun. Everything started out calmly but soon things started to heat up as in the third hour all of her garments were cut off by a man with a sharp blade. This was just the beginning as within the next hour her throat was slit so that her blood could be sucked..."
+       - Avoid flat summaries like "their bodies were found later" or "it remains a mystery". Instead, zoom into one concrete, unsettling scene or turning point and describe what actually happened.
        - No filler. Every sentence should add a fact, an image, or tension.
 
-       RULES:
-       - Voiceover: MAX 900 characters including spaces. Write the full narration in "voiceover".
+      RULES:
+       - Voiceover (top-level): MAX 900 characters including spaces. Write the full narration in "voiceover" as one continuous script.
        - Scenes: 6 to 12 scenes, each "duration": 5. One video clip will be generated per scene.
+       - Each scene MUST also include a "voiceover" field: the specific lines being spoken during that scene (1–3 sentences). If you concatenate all scene.voiceover strings in order, it should roughly match the full top-level "voiceover".
        - Scene prompts must be IN-DEPTH and DETAILED (2–4 sentences each): describe setting, lighting, camera angle, mood, key objects or actions, and period-appropriate details. Every prompt MUST end with: "9:16 aspect ratio, vertical portrait format" so the video is correct for Shorts. Example: "Dim 1970s white gallery space, single woman in neutral clothes standing motionless beside a long table. On the table lie 72 objects including scissors, a whip, roses, and a loaded gun. Harsh overhead lights, tense stillness, spectators visible in soft focus at the edges. Documentary style, cinematic. 9:16 aspect ratio, vertical portrait format." No text or captions in the visual.
 
        Return ONLY valid JSON:
-       { "voiceover": "Full natural script, under 900 characters.", "scenes": [ { "prompt": "In-depth 2–4 sentence visual description ending with '9:16 aspect ratio, vertical portrait format'", "duration": 5 }, ... ] }`;
+       { "voiceover": "Full natural script, under 900 characters.", "scenes": [ { "prompt": "In-depth 2–4 sentence visual description ending with '9:16 aspect ratio, vertical portrait format'", "voiceover": "Lines spoken during this scene.", "duration": 5 }, ... ] }`;
   const completion = await openai.chat.completions.create({
     model: "gpt-4o",
     messages: [
@@ -314,7 +457,7 @@ async function main() {
   }
   if (RUN_STEP != null) log('MAIN', `Running only STEP ${RUN_STEP}. (Unset RUN_STEP to run the full pipeline.)`);
   else log('MAIN', 'Starting full pipeline (all 4 steps).');
-  if (TEST_MODE) log('MAIN', 'TEST MODE: 1 scene, short voiceover');
+  if (TEST_MODE) log('MAIN', 'TEST MODE: 1 scene (~10s), per-scene audio');
 
   if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
   if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -356,54 +499,141 @@ async function main() {
   // ─── STEP 2: VOICEOVER ───
   if (RUN_STEP === null || RUN_STEP === 2) stepBanner(2, 'VOICEOVER');
   const audioPath = path.join(TEMP_DIR, 'audio.mp3');
+  const scenes = TEST_MODE ? scriptData.scenes.slice(0, 1) : scriptData.scenes;
+  const hasPerSceneVoiceover = scenes.every(
+    (s) => typeof (s as { voiceover?: string }).voiceover === 'string' && !!(s as { voiceover?: string }).voiceover?.trim()
+  );
+
   if (RUN_STEP === null || RUN_STEP === 2) {
-    if (REUSE_TEMP && fs.existsSync(audioPath)) {
-      log('MAIN', 'Using existing temp/audio.mp3');
-      log('MAIN', 'Step 2 done: audio ready');
-    } else {
+    if (REUSE_TEMP) {
+      const allSceneAudioExist =
+        hasPerSceneVoiceover &&
+        scenes.every((_, i) => fs.existsSync(path.join(TEMP_DIR, `audio_scene_${i}.mp3`)));
+      if (allSceneAudioExist && fs.existsSync(audioPath)) {
+        log('MAIN', 'Using existing per-scene temp/audio_scene_*.mp3 and combined temp/audio.mp3');
+        log('MAIN', 'Step 2 done: audio ready');
+      } else if (!hasPerSceneVoiceover && fs.existsSync(audioPath)) {
+        log('MAIN', 'Using existing temp/audio.mp3');
+        log('MAIN', 'Step 2 done: audio ready');
+      }
+    }
+
+    if (!REUSE_TEMP || !fs.existsSync(audioPath)) {
       validateApiKeysForStep('audio');
-      log('MAIN', 'Generating voiceover (ElevenLabs)');
-    const audioStream = await eleven.generate({
-      voice: "PlmstgXEUNQWiPyS27i2",
-      text: scriptData.voiceover,
-      model_id: "eleven_multilingual_v2",
-      voice_settings: {
-        stability: 0.5,
-        similarity_boost: 0.4,
-        style: 0,
-        use_speaker_boost: true,
-        speed: 0.99
-      }
-    });
-    const audioFile = fs.createWriteStream(audioPath);
-    log('AUDIO', 'Streaming to ./temp/audio.mp3');
-    if (typeof (audioStream as { pipe?: unknown }).pipe === 'function') {
-      await new Promise<void>((resolve, reject) => {
-        (audioStream as NodeJS.ReadableStream).pipe(audioFile);
-        audioFile.on('finish', () => resolve());
-        audioFile.on('error', reject);
-      });
-    } else {
-      // Web ReadableStream (no .pipe): consume with getReader and write chunks
-      const reader = (audioStream as unknown as ReadableStream<Uint8Array>).getReader();
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          audioFile.write(Buffer.from(value));
+
+      if (hasPerSceneVoiceover) {
+        log('MAIN', 'Generating per-scene voiceover (ElevenLabs)');
+        // Generate one audio file per scene: temp/audio_scene_{i}.mp3
+        for (let i = 0; i < scenes.length; i++) {
+          const sceneVo = (scenes[i] as { voiceover?: string }).voiceover!;
+          const sceneAudioPath = path.join(TEMP_DIR, `audio_scene_${i}.mp3`);
+          log('AUDIO', `Scene ${i}: generating voiceover`);
+          const audioStream = await eleven.generate({
+            voice: "PlmstgXEUNQWiPyS27i2",
+            text: sceneVo,
+            model_id: "eleven_multilingual_v2",
+            voice_settings: {
+              stability: 0.5,
+              similarity_boost: 0.4,
+              style: 0,
+              use_speaker_boost: true,
+              speed: 0.99
+            }
+          });
+          const audioFile = fs.createWriteStream(sceneAudioPath);
+          if (typeof (audioStream as { pipe?: unknown }).pipe === 'function') {
+            await new Promise<void>((resolve, reject) => {
+              (audioStream as NodeJS.ReadableStream).pipe(audioFile);
+              audioFile.on('finish', () => resolve());
+              audioFile.on('error', reject);
+            });
+          } else {
+            const reader = (audioStream as unknown as ReadableStream<Uint8Array>).getReader();
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                audioFile.write(Buffer.from(value));
+              }
+            } finally {
+              reader.releaseLock();
+            }
+            audioFile.end();
+            await new Promise<void>((resolve, reject) => {
+              audioFile.on('finish', () => resolve());
+              audioFile.on('error', reject);
+            });
+          }
+          log('AUDIO', `Scene ${i}: voiceover saved to ${sceneAudioPath}`);
         }
-      } finally {
-        reader.releaseLock();
+
+        // Concatenate per-scene audio files into a single temp/audio.mp3
+        const listPath = path.join(TEMP_DIR, 'audio_files.txt');
+        const listContent = scenes
+          .map((_, i) => path.join(TEMP_DIR, `audio_scene_${i}.mp3`))
+          .map((p) => `file '${p.replace(/\\/g, '/')}'`)
+          .join('\n');
+        fs.writeFileSync(listPath, listContent);
+        log('AUDIO', `Wrote audio concat list (${scenes.length} file(s))`);
+
+        await new Promise<void>((resolve, reject) => {
+          ffmpeg()
+            .input(listPath)
+            .inputOptions(['-f concat', '-safe 0'])
+            .outputOptions(['-c copy'])
+            .save(audioPath)
+            .on('start', () => log('AUDIO', 'Concatenating per-scene audio → temp/audio.mp3'))
+            .on('end', () => {
+              log('AUDIO', 'Combined audio file written');
+              resolve();
+            })
+            .on('error', (err: Error) => reject(err));
+        });
+        log('MAIN', 'Step 2 done: per-scene + combined audio ready');
+      } else {
+        log('MAIN', 'Generating single voiceover (ElevenLabs)');
+        const audioStream = await eleven.generate({
+          voice: "PlmstgXEUNQWiPyS27i2",
+          text: scriptData.voiceover,
+          model_id: "eleven_multilingual_v2",
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.4,
+            style: 0,
+            use_speaker_boost: true,
+            speed: 0.99
+          }
+        });
+        const audioFile = fs.createWriteStream(audioPath);
+        log('AUDIO', 'Streaming to ./temp/audio.mp3');
+        if (typeof (audioStream as { pipe?: unknown }).pipe === 'function') {
+          await new Promise<void>((resolve, reject) => {
+            (audioStream as NodeJS.ReadableStream).pipe(audioFile);
+            audioFile.on('finish', () => resolve());
+            audioFile.on('error', reject);
+          });
+        } else {
+          const reader = (audioStream as unknown as ReadableStream<Uint8Array>).getReader();
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              audioFile.write(Buffer.from(value));
+            }
+          } finally {
+            reader.releaseLock();
+          }
+          audioFile.end();
+          await new Promise<void>((resolve, reject) => {
+            audioFile.on('finish', () => resolve());
+            audioFile.on('error', reject);
+          });
+        }
+        log('AUDIO', 'Voiceover file written');
+        log('MAIN', 'Step 2 done: audio saved to temp/audio.mp3');
       }
-      audioFile.end();
-      await new Promise<void>((resolve, reject) => {
-        audioFile.on('finish', () => resolve());
-        audioFile.on('error', reject);
-      });
     }
-      log('AUDIO', 'Voiceover file written');
-      log('MAIN', 'Step 2 done: audio saved to temp/audio.mp3');
-    }
+
     if (RUN_STEP === 2) {
       log('MAIN', 'Step 2 complete. Run RUN_STEP=3 next, or run without RUN_STEP for full pipeline.');
       return;
@@ -411,7 +641,6 @@ async function main() {
   }
 
   // ─── STEP 3: VIDEO CLIPS ───
-  const scenes = TEST_MODE ? scriptData.scenes.slice(0, 1) : scriptData.scenes;
   const tempDirForClips = TEMP_DIR;
   const allClipsExist = scenes.every((_, i) => fs.existsSync(path.join(tempDirForClips, `clip_${i}.mp4`)));
   if (RUN_STEP === null || RUN_STEP === 3) {
@@ -472,20 +701,24 @@ async function main() {
   }
   const musicPath = path.resolve(process.cwd(), BACKGROUND_MUSIC_PATH);
   const useBackgroundMusic = fs.existsSync(musicPath);
-  // Force 9:16 vertical for Shorts (1080x1920); scale to fit then pad so no stretch
-  const videoFilter9x16 = 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2';
+  // Force 9:16 vertical for Shorts (1080x1920); scale and crop to fill frame (no black bars)
+  // Use force_original_aspect_ratio=increase so the shorter side always fits, then center-crop.
+  const videoFilter9x16 = 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920';
+
+  // Normalize every clip to its scene duration so visual scene changes line up with narration beats.
+  // If per-scene audio files (audio_scene_i.mp3) exist, align each clip to its exact audio duration.
+  log('FFMPEG', 'Preparing clips: trim/pad each scene to its target duration for better audio sync');
+  const trimmedPaths = await prepareClipsToSceneDurations(tempDir, scenes);
 
   await new Promise<void>((resolve, reject) => {
     const chain = ffmpeg();
 
     if (scenes.length === 1) {
-      const clipPath = path.join(tempDir, 'clip_0.mp4');
       log('FFMPEG', `Single clip: muxing + audio${useBackgroundMusic ? ' + background music (fade in/out)' : ''} → ${outputPath} (9:16)`);
-      chain.input(clipPath);
+      chain.input(trimmedPaths[0]);
     } else {
       const listPath = path.join(tempDir, 'files.txt');
-      const fileList = scenes
-        .map((_, i) => path.join(tempDir, `clip_${i}.mp4`))
+      const fileList = trimmedPaths
         .map((p) => `file '${p.replace(/\\/g, '/')}'`)
         .join('\n');
       fs.writeFileSync(listPath, fileList);
@@ -553,6 +786,13 @@ async function main() {
       })
       .catch(reject);
   });
+
+  // ─── STEP 5: YOUTUBE METADATA (TITLES / DESCRIPTION / TAGS) ───
+  try {
+    await generateYouTubeMetadata(topic, scriptData);
+  } catch (err) {
+    log('YT_META', `Metadata generation failed: ${(err as Error).message}`);
+  }
 }
 
 main().catch((err) => {
