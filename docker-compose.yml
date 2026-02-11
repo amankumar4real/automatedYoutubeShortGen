@@ -28,13 +28,25 @@ services:
       mongo:
         condition: service_healthy
 
+  web:
+    image: nginx:alpine
+    container_name: shorts-web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+
   tunnel:
     image: cloudflare/cloudflared:latest
     container_name: shorts-tunnel
     restart: unless-stopped
-    command: tunnel --url http://api:4000
+    command: tunnel --url http://web:80
     depends_on:
-      - api
+      - web
 
 volumes:
   mongo_data:

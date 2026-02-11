@@ -236,7 +236,7 @@ To host the backend on a VPS and expose it over HTTPS with a free temporary URL 
    ```
    Copy the `https://...trycloudflare.com` URL when it appears (Ctrl+C to exit logs).
 
-5. **Use the app:** In the frontend, set **API base URL** to that URL. Check: `curl -s https://YOUR-URL/health` → `{"ok":true}`.
+5. **Use the app:** Open that URL in your browser. The frontend and API are served from the same origin, so the API base URL is set automatically. You can log in and use the app. Check health: `curl -s https://YOUR-URL/health` → `{"ok":true}`.
 
 **Useful commands:** `docker compose ps` (status), `docker compose logs -f api` (API logs), `docker compose down` (stop). To run only the API (no tunnel), use `docker compose up -d api` and expose port 4000 yourself (e.g. reverse proxy).
 

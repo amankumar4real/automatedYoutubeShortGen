@@ -282,7 +282,7 @@
           <div class="card-header">API &amp; account</div>
           <div style="margin-bottom: 1rem">
             <label for="apiBaseAuth">API base URL</label>
-            <input id="apiBaseAuth" type="text" value="http://localhost:4000" placeholder="http://localhost:4000" />
+            <input id="apiBaseAuth" type="text" value="http://localhost:4000" placeholder="http://localhost:4000 or https://xxx.trycloudflare.com (production)" />
           </div>
           <div style="margin-bottom: 1rem">
             <label for="authUsername">Username</label>
@@ -310,7 +310,7 @@
         <div class="card">
           <div class="card-header">New short</div>
           <label for="apiBase">API base URL</label>
-          <input id="apiBase" type="text" value="http://localhost:4000" style="margin-bottom: 1rem;" />
+          <input id="apiBase" type="text" value="http://localhost:4000" placeholder="http://localhost:4000 or https://xxx.trycloudflare.com (production)" style="margin-bottom: 1rem;" />
           <div class="row" style="margin-bottom: 1rem;">
             <div class="grow">
               <label for="topic">Topic</label>
@@ -415,7 +415,13 @@
       function setToken(t) { if (t) localStorage.setItem(AUTH_TOKEN_KEY, t); else localStorage.removeItem(AUTH_TOKEN_KEY); }
       function setUserName(u) { if (u) localStorage.setItem(USER_NAME_KEY, u); else localStorage.removeItem(USER_NAME_KEY); }
       function getUserName() { return localStorage.getItem(USER_NAME_KEY) || ''; }
-      function getApiBase() { return (localStorage.getItem(API_BASE_KEY) || 'http://localhost:4000').replace(/\/$/, ''); }
+      function getApiBase() {
+        const stored = localStorage.getItem(API_BASE_KEY);
+        if (stored) return stored.replace(/\/$/, '');
+        if (typeof window !== 'undefined' && window.location.origin && window.location.origin !== 'http://localhost:4000')
+          return window.location.origin.replace(/\/$/, '');
+        return 'http://localhost:4000'.replace(/\/$/, '');
+      }
       function setApiBase(b) { localStorage.setItem(API_BASE_KEY, (b || '').replace(/\/$/, '')); }
 
       // In-memory topic suggestion state for the current session
