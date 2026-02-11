@@ -17,6 +17,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY --from=builder /app/backend ./backend
+COPY --from=builder /app/automate_shorts.js ./
 
 ENV NODE_ENV=production
 EXPOSE 4000
