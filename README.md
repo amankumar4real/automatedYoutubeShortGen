@@ -206,6 +206,53 @@ If you want to access your local backend from another device:
 
 All client requests will then be tunneled to your local Express backend.
 
+### Production deployment (server + HTTPS)
+
+To host the backend on a VPS and expose it over HTTPS with a free temporary URL you can use **Docker** (recommended) or the **PM2 + cloudflared scripts**.
+
+#### Deploy on your server (Docker, quick steps)
+
+1. **SSH into your server** and install Docker + Docker Compose if needed:
+   - [Docker Engine](https://docs.docker.com/engine/install/)  
+   - [Docker Compose](https://docs.docker.com/compose/install/) (or use the plugin: `docker compose`)
+
+2. **Clone the repo and add config:**
+   ```bash
+   git clone <your-repo-url> scripts && cd scripts
+   cp .env.example .env
+   nano .env   # set at least: JWT_SECRET, OPENAI_API_KEY, ELEVEN_API_KEY; MONGODB_URI is overridden by compose
+   ```
+
+3. **Deploy:**
+   ```bash
+   chmod +x deploy/docker-deploy.sh
+   ./deploy/docker-deploy.sh
+   ```
+   Or manually: `docker compose up -d --build`
+
+4. **Get your public URL:** The tunnel prints an HTTPS URL. Run:
+   ```bash
+   docker compose logs -f tunnel
+   ```
+   Copy the `https://...trycloudflare.com` URL when it appears (Ctrl+C to exit logs).
+
+5. **Use the app:** In the frontend, set **API base URL** to that URL. Check: `curl -s https://YOUR-URL/health` → `{"ok":true}`.
+
+**Useful commands:** `docker compose ps` (status), `docker compose logs -f api` (API logs), `docker compose down` (stop). To run only the API (no tunnel), use `docker compose up -d api` and expose port 4000 yourself (e.g. reverse proxy).
+
+#### Option B: PM2 + cloudflared scripts
+
+1. **On the server** (after cloning the repo and copying `.env`):
+   - Run `./deploy/01-setup-runtime.sh` (checks Node 18+, runs `npm ci`, `npm run build`, checks `.env`).
+   - Run `./deploy/02-pm2.sh` (starts backend with PM2, saves process list, enables startup on reboot). If PM2 prints a `sudo env PATH=...` command, run it.
+   - Install cloudflared (Ubuntu: download `.deb` from [cloudflared releases](https://github.com/cloudflare/cloudflared/releases), then `sudo dpkg -i cloudflared.deb`). Run `./deploy/03-tunnel.sh` and leave it running (or run inside `tmux`/`screen`). Note the `https://*.trycloudflare.com` URL it prints.
+
+2. **Frontend:** Open the web client (locally or hosted). Set **API base URL** to the tunnel URL (e.g. `https://abc123.trycloudflare.com`). Log in and use the app; all API calls go over HTTPS to your server.
+
+3. **Verify:** `curl -s https://YOUR-TUNNEL-URL/health` should return `{"ok":true}`. Use `pm2 status` and `pm2 logs shorts-api` on the server to check the backend.
+
+If the tunnel process stops, the URL changes; run `./deploy/03-tunnel.sh` again (or restart the `tunnel` container with Docker) to get a new one. For a stable hostname, use a Cloudflare account and a named tunnel or your own domain.
+
 ---
 
 ## Manual video workflow (MANUAL_GROK=true)

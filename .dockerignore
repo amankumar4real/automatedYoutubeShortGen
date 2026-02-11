@@ -1,0 +1,12 @@
+node_modules
+.git
+.env
+.env.*
+temp
+output
+frontend
+.cursor
+deploy
+*.md
+curl-examples.md
+.DS_Store
