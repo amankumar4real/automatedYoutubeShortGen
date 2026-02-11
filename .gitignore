@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Env (secrets)
+.env
+.env.*
+!.env.example
+
+# Build / temp / output
+temp/
+output/
+*.js
+!jest.config.js
+
+# OS
+.DS_Store
