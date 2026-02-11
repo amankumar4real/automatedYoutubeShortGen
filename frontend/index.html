@@ -589,8 +589,10 @@
         }
       }
 
+      let detailScriptLoaded = false;
       async function loadProjectDetail(projectId) {
         currentProjectId = projectId;
+        detailScriptLoaded = false;
         if (detailPollTimer) clearInterval(detailPollTimer);
         const statusCard = document.getElementById('detailStatusCard');
         const resultCard = document.getElementById('resultCard');
@@ -615,7 +617,10 @@
           const btnDelete = document.getElementById('btnDeleteProject');
           if (btnDelete) btnDelete.style.display = 'inline-flex';
           if (promptsCardEl) promptsCardEl.style.display = showPrompts ? 'block' : 'none';
-          if (showPrompts) loadProjectScript(projectId);
+          if (showPrompts && !detailScriptLoaded) {
+            detailScriptLoaded = true;
+            loadProjectScript(projectId);
+          }
           if (data.status === 'assembly_done' || data.status === 'error') {
             if (detailPollTimer) {
               clearInterval(detailPollTimer);
