@@ -24,6 +24,11 @@ services:
       - NODE_ENV=production
       - PORT=4000
       - MONGODB_URI=mongodb://mongo:27017
+      # Optional: set if you mount background music (see README)
+      - BACKGROUND_MUSIC_PATH=/app/data/background_music/background_music.mp3
+    volumes:
+      # Optional: create ./data/background_music/ on host and add background_music.mp3 for pipeline music
+      - ./data/background_music:/app/data/background_music:ro
     depends_on:
       mongo:
         condition: service_healthy

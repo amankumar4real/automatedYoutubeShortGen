@@ -240,6 +240,14 @@ To host the backend on a VPS and expose it over HTTPS with a free temporary URL 
 
 **Useful commands:** `docker compose ps` (status), `docker compose logs -f api` (API logs), `docker compose down` (stop). To run only the API (no tunnel), use `docker compose up -d api` and expose port 4000 yourself (e.g. reverse proxy).
 
+**Optional – background music on server:** The pipeline can mix in a single background music file. On the server, create a directory and add your file, then restart the API so the mount is used:
+```bash
+mkdir -p data/background_music
+# Copy your track (e.g. from your machine via scp) into data/background_music/background_music.mp3
+docker compose up -d api
+```
+If the file is missing, assembly runs as usual with no music.
+
 #### Option B: PM2 + cloudflared scripts
 
 1. **On the server** (after cloning the repo and copying `.env`):

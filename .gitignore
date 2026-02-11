@@ -9,6 +9,7 @@ node_modules/
 # Build / temp / output
 temp/
 output/
+data/
 *.js
 !jest.config.js
 
