@@ -245,6 +245,8 @@ To host the backend on a VPS and expose it over HTTPS with a free temporary URL 
 
 **Useful commands:** `docker compose ps` (status), `docker compose logs -f api` (API logs), `docker compose down` (stop). To run only the API (no tunnel), use `docker compose up -d api` and expose port 4000 yourself (e.g. reverse proxy).
 
+**Server hardening:** For non-root containers, no Mongo/API ports exposed, and only SSH (2222) + nginx (80/443) on the host, see [deploy/SECURITY.md](deploy/SECURITY.md).
+
 **Optional – background music on server:** The pipeline can mix in a single background music file. On the server, create a directory and add your file, then restart the API so the mount is used:
 ```bash
 mkdir -p data/background_music

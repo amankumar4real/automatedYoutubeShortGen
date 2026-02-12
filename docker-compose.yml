@@ -1,3 +1,6 @@
+# Security: no containers mount /var/run/docker.sock. Only nginx (web) is published (80/443).
+# Run: sudo ss -tulpn → expect only ssh (2222) and nginx (80/443). See deploy/SECURITY.md.
+
 services:
   mongo:
     image: mongo:7
@@ -6,11 +9,12 @@ services:
     environment:
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME:-}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:-}
-    # Bind to localhost only so Mongo is not reachable from the internet (API connects via internal network).
-    ports:
-      - "127.0.0.1:27017:27017"
+    # Do NOT expose Mongo on the host; API reaches it via internal network only.
+    # ports: none
     volumes:
       - mongo_data:/data/db
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       # When MONGO_INITDB_ROOT_* are set, auth is enabled: use credentials. Otherwise ping without auth.
       test: ["CMD", "sh", "-c", "if [ -n \"$$MONGO_INITDB_ROOT_USERNAME\" ]; then mongosh -u \"$$MONGO_INITDB_ROOT_USERNAME\" -p \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")'; else mongosh --eval 'db.adminCommand(\"ping\")'; fi"]
@@ -22,10 +26,10 @@ services:
     build: .
     container_name: shorts-api
     restart: unless-stopped
-    # No port publish: only nginx (web) reaches API via internal network. Omit to expose 4000 on host.
-    # ports:
-    #   - "4000:4000"
+    # No port publish: only nginx (web) reaches API; no worker/ffmpeg ports exposed.
     env_file: .env
+    security_opt:
+      - no-new-privileges:true
     environment:
       - NODE_ENV=production
       - PORT=4000
@@ -43,12 +47,15 @@ services:
     image: nginx:alpine
     container_name: shorts-web
     restart: unless-stopped
-    # Localhost only: tunnel container connects to web via internal network; no direct public access to port 80.
+    # Only public ports: nginx on 80 and 443 (everything behind Nginx). Add SSL for 443 (e.g. certbot).
     ports:
-      - "127.0.0.1:80:80"
+      - "80:80"
+      - "443:443"
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
       - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - api
 
@@ -59,7 +66,9 @@ services:
     env_file: .env
     environment:
       - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
-    # Named tunnel: stable hostname via Cloudflare dashboard mapping.
+    security_opt:
+      - no-new-privileges:true
+    # No Docker socket mount; tunnel connects outbound to Cloudflare only.
     command: tunnel run --token ${TUNNEL_TOKEN}
     depends_on:
       - web
