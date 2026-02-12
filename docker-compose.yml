@@ -52,8 +52,8 @@ services:
     env_file: .env
     environment:
       - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
-    # If TUNNEL_TOKEN is set (named tunnel), use it for a stable URL; else quick tunnel (random URL).
-    command: ["sh", "-c", "if [ -n \"$$TUNNEL_TOKEN\" ]; then exec cloudflared tunnel run --token $$TUNNEL_TOKEN; else exec cloudflared tunnel --url http://web:80; fi"]
+    # Quick tunnel: exposes web:80 at https://<random>.trycloudflare.com (see deploy/NAMED-TUNNEL.md for stable URL).
+    command: ["tunnel", "--url", "http://web:80"]
     depends_on:
       - web
 
