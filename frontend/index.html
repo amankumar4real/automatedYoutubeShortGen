@@ -183,6 +183,13 @@
         border: 1px solid var(--border);
         background: #000;
       }
+      audio {
+        width: 100%;
+        max-width: 360px;
+      }
+      .audio-body {
+        padding-top: 0.25rem;
+      }
       textarea {
         width: 100%;
         min-height: 96px;
@@ -216,9 +223,85 @@
         transition: background 0.15s, border-color 0.15s;
       }
       .copy-btn:hover, .chip:hover { background: #243049; border-color: #334155; }
+      .copy-btn-sm { padding: 0.35rem 0.65rem; font-size: 0.8125rem; }
+      .prompts-voiceover-actions { display: flex; align-items: center; gap: 0.5rem; }
+      .scene-prompt { display: flex; align-items: flex-start; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+      .scene-prompt .scene-prompt-content { flex: 1 1 0; min-width: 0; }
       .chip { margin: 0.25rem 0.25rem 0.25rem 0; }
       .chip.selected { border-color: var(--accent); background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
-      #topicSuggestions { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.5rem; }
+      .projects-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .projects-header h1 { margin: 0; }
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .logged-in-text { font-size: 0.875rem; color: var(--text-muted); }
+      .dropdown-caret { font-size: 0.65rem; opacity: 0.8; }
+      .topic-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+      .suggest-btn-wrap { display: flex; flex-direction: column; justify-content: flex-end; min-width: 140px; }
+      .topic-suggestions-wrapper { position: relative; }
+      .suggestions-overlay {
+        display: none;
+        position: absolute;
+        top: 100%;
+        right: 0;
+        margin-top: 0.5rem;
+        min-width: 260px;
+        max-width: 320px;
+        max-height: 280px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        box-shadow: var(--shadow), 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        z-index: 10;
+        overflow: hidden;
+      }
+      .suggestions-overlay.is-visible { display: block; }
+      .suggestions-overlay-title {
+        padding: 0.75rem 1rem;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--text);
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .suggestions-overlay-list {
+        max-height: 220px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .suggestions-overlay-list::-webkit-scrollbar { width: 6px; }
+      .suggestions-overlay-list::-webkit-scrollbar-track { background: transparent; }
+      .suggestions-overlay-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+      .suggestions-overlay-list::-webkit-scrollbar-thumb:hover { background: #334155; }
+      .suggestions-overlay-list .chip {
+        margin: 0;
+        width: 100%;
+        display: block;
+        text-align: left;
+        white-space: normal;
+        padding: 0.5rem 0.75rem;
+        box-sizing: border-box;
+      }
+      .suggestions-overlay-list .chip.selected { border-color: var(--accent); background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
+      .suggestions-message { font-size: 0.8125rem; color: var(--text-muted); padding: 0.5rem 0; }
+      .btn-full { width: 100%; justify-content: center; }
+      .empty-projects { display: none; padding: 0.5rem 0; }
+      .status-row { display: flex; align-items: center; margin-bottom: 0.5rem; gap: 0.75rem; }
+      .status-project-id { font-size: 0.8125rem; }
+      .prompts-card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
       .project-list { list-style: none; padding: 0; margin: 0; }
       .project-list li {
         padding: 1rem 1.15rem;
@@ -229,13 +312,20 @@
         cursor: pointer;
         display: flex;
         justify-content: space-between;
-        align-items: center;
+        align-items: flex-start;
+        gap: 1rem;
         transition: background 0.15s, border-color 0.15s;
       }
       .project-list li:hover {
         background: #1e293b;
         border-color: #334155;
       }
+      .project-list .project-left { min-width: 0; }
+      .project-list .project-title { font-weight: 600; margin-bottom: 0.2rem; }
+      .project-list .project-details { font-size: 0.8125rem; color: var(--text-muted); }
+      .project-list .project-right { display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; }
+      .project-list .project-right .pill { margin-bottom: 0.25rem; }
+      .project-list .project-time { font-size: 0.75rem; color: var(--text-dim); }
       .stage-history { font-size: 0.8125rem; color: var(--text-muted); margin-top: 0.75rem; }
       .stage-history div { margin: 0.25rem 0; }
       .link {
@@ -282,15 +372,15 @@
           <div class="card-header">API &amp; account</div>
           <div style="margin-bottom: 1rem">
             <label for="apiBaseAuth">API base URL</label>
-            <input id="apiBaseAuth" type="text" value="http://localhost:4000" placeholder="http://localhost:4000 or https://xxx.trycloudflare.com (production)" />
+            <input id="apiBaseAuth" type="text" value="http://localhost:4000" placeholder="https://your-api.example.com" />
           </div>
           <div style="margin-bottom: 1rem">
             <label for="authUsername">Username</label>
-            <input id="authUsername" type="text" autocomplete="username" placeholder="Your username" />
+            <input id="authUsername" type="text" autocomplete="username" placeholder="Username" />
           </div>
           <div style="margin-bottom: 1.25rem">
             <label for="authPassword">Password</label>
-            <input id="authPassword" type="password" autocomplete="current-password" placeholder="••••••••" />
+            <input id="authPassword" type="password" autocomplete="current-password" placeholder="Password" />
           </div>
           <div class="btn-group">
             <button id="btnLogin" class="primary">Log in</button>
@@ -301,47 +391,52 @@
       </div>
 
       <div id="pageProjects" class="page">
-        <div class="row" style="align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 1.5rem;">
-          <div>
-            <h1>My Shorts</h1>
-            <p class="subtitle" style="margin: 0;">Logged in as <strong id="userName"></strong>. <a href="#" id="linkLogout" class="link">Log out</a></p>
+        <div class="projects-header">
+          <h1>My Shorts</h1>
+          <div class="header-right">
+            <span class="logged-in-text">Logged in <span class="dropdown-caret" aria-hidden="true">▾</span></span>
+            <button type="button" id="btnLogout" class="secondary">Log out</button>
           </div>
         </div>
         <div class="card">
           <div class="card-header">New short</div>
-          <label for="apiBase">API base URL</label>
-          <input id="apiBase" type="text" value="http://localhost:4000" placeholder="http://localhost:4000 or https://xxx.trycloudflare.com (production)" style="margin-bottom: 1rem;" />
-          <div class="row" style="margin-bottom: 1rem;">
-            <div class="grow">
-              <label for="topic">Topic</label>
-              <input id="topic" type="text" placeholder="e.g. The Beast of Gévaudan" />
-              <div id="topicSuggestions" class="small"></div>
+          <label for="apiBase">API</label>
+          <input id="apiBase" type="text" value="http://localhost:4000" placeholder="https://your-api.example.com" style="margin-bottom: 1rem;" />
+          <div class="topic-suggestions-wrapper">
+            <div class="topic-row">
+              <div class="grow">
+                <label for="topic">Topic</label>
+                <input id="topic" type="text" placeholder="Type a topic" />
+              </div>
+              <div class="suggest-btn-wrap">
+                <button id="btnSuggestTopic" type="button" class="secondary">Suggest topic</button>
+              </div>
             </div>
-            <div style="display: flex; flex-direction: column; justify-content: flex-end; min-width: 140px;">
-              <button id="btnSuggestTopic" type="button" class="secondary">Suggest topic</button>
+            <div id="topicSuggestions" class="suggestions-overlay">
+              <div class="suggestions-overlay-title">Suggested Topics</div>
+              <div class="suggestions-overlay-list"></div>
             </div>
           </div>
-          <button id="btnNewProject" type="button" class="primary">Create new short</button>
+          <button id="btnNewProject" type="button" class="primary btn-full">Create new short</button>
         </div>
         <div class="card">
           <div class="card-header">Your projects</div>
           <ul id="projectList" class="project-list"></ul>
-          <div id="projectListEmpty" class="small" style="display: none;">No projects yet. Create one above.</div>
+          <div id="projectListEmpty" class="small empty-projects" style="display: none;">No projects yet. Create one above.</div>
         </div>
       </div>
 
       <div id="pageProjectDetail" class="page">
         <div class="detail-header">
           <a href="#/projects" id="backToProjects" class="link nav-back">← Back to projects</a>
-          <button type="button" id="btnDeleteProject" class="danger" style="display: none;">Delete project</button>
+          <button type="button" id="btnDeleteProject" class="danger" style="display: none;">Delete</button>
         </div>
         <h1 id="detailTopic">Project</h1>
         <div class="card card-status" id="detailStatusCard">
           <div class="card-header">Status</div>
-          <div class="row" style="align-items: center; margin-bottom: 0.5rem">
+          <div class="status-row">
             <div class="grow">
-              <div class="small">Project ID</div>
-              <div id="detailProjectId" class="status"></div>
+              <div id="detailProjectId" class="status status-project-id"></div>
             </div>
             <span id="detailStatusPill" class="pill pill-draft">draft</span>
           </div>
@@ -360,15 +455,25 @@
             </div>
           </div>
         </div>
+        <div class="card" id="audioCard" style="display: none;">
+          <div class="card-header">Audio</div>
+          <div class="audio-body">
+            <div class="small" style="margin-bottom: 0.35rem;">Voiceover track</div>
+            <audio id="audioPlayer" controls></audio>
+          </div>
+        </div>
         <div class="card card-prompts" id="promptsCard" style="display: none;">
-          <div class="card-header">Video prompts</div>
+          <div class="prompts-card-head">
+            <div class="card-header" style="margin-bottom: 0;">Video prompts</div>
+            <div id="promptsVoiceoverWrap" class="prompts-voiceover-actions">
+              <button type="button" class="secondary small" id="toggleVoiceover" aria-expanded="false">Show full voiceover</button>
+              <button type="button" class="copy-btn copy-btn-sm" data-copy-target="promptsVoiceover">Copy</button>
+            </div>
+          </div>
+          <div id="promptsVoiceover" class="prompt-block" style="display: none; margin-top: 0.5rem; margin-bottom: 1rem;"></div>
           <div id="promptsLoading" class="small" style="display: none;">Loading prompts…</div>
           <div id="promptsError" class="small err" style="display: none;"></div>
           <div id="promptsContent" style="display: none;">
-            <div id="promptsVoiceoverWrap" style="margin-bottom: 1rem;">
-              <button type="button" class="secondary small" id="toggleVoiceover" aria-expanded="false">Show full voiceover</button>
-              <div id="promptsVoiceover" class="prompt-block" style="display: none; margin-top: 0.5rem;"></div>
-            </div>
             <div id="promptsScenes"></div>
           </div>
         </div>
@@ -472,6 +577,18 @@
         }[status] || 'pill-draft');
       }
 
+      function relativeTime(dateStr) {
+        if (!dateStr) return '';
+        const d = new Date(dateStr);
+        const now = new Date();
+        const sec = Math.floor((now - d) / 1000);
+        if (sec < 60) return 'Just now';
+        if (sec < 3600) return Math.floor(sec / 60) + ' minutes ago';
+        if (sec < 86400) return Math.floor(sec / 3600) + ' hours ago';
+        if (sec < 604800) return Math.floor(sec / 86400) + ' days ago';
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      }
+
       function renderProjectList(projects) {
         const list = document.getElementById('projectList');
         const empty = document.getElementById('projectListEmpty');
@@ -485,8 +602,12 @@
         projects.forEach((p) => {
           const li = document.createElement('li');
           const pillClass = p.status === 'assembly_done' ? 'pill-assembly_done' : p.status === 'waiting_for_clips' ? 'pill-waiting_for_clips' : p.status === 'error' ? 'pill-error' : 'pill-draft';
-          const updated = p.updatedAt ? new Date(p.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-          li.innerHTML = '<div><div style="font-weight: 600;">' + (p.topic || 'Untitled').replace(/</g, '&lt;') + '</div><div class="small">' + updated + '</div></div><span class="pill ' + pillClass + '">' + (p.status || 'draft').replace(/_/g, ' ') + '</span>';
+          const topic = (p.topic || 'Untitled').replace(/</g, '&lt;');
+          const shortId = (p.projectId || '').length > 12 ? (p.projectId || '').slice(0, 10) + '…' : (p.projectId || '');
+          const details = 'Project: ' + topic + (shortId ? '. ' + shortId : '');
+          const timeStr = relativeTime(p.updatedAt);
+          const statusLabel = (p.status || 'draft').replace(/_/g, ' ');
+          li.innerHTML = '<div class="project-left"><div class="project-title">' + topic + '</div><div class="project-details">' + details + '</div></div><div class="project-right"><span class="pill ' + pillClass + '">' + statusLabel + '</span><span class="project-time">' + timeStr + '</span></div>';
           li.onclick = () => { window.location.hash = '#/projects/' + p.projectId; };
           list.appendChild(li);
         });
@@ -541,6 +662,8 @@
 
       let currentProjectId = null;
       let detailPollTimer = null;
+      let currentAudioUrl = null;
+      let currentAudioKey = null;
 
       async function loadProjectScript(projectId) {
         const loadingEl = document.getElementById('promptsLoading');
@@ -574,7 +697,8 @@
           if (scenesEl) {
             scenesEl.innerHTML = script.scenes.map(function(s, i) {
               var sceneVo = s.voiceover ? '<div class="small" style="margin-top:0.35rem;color:var(--text-dim);">' + String(s.voiceover).replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>' : '';
-              return '<div class="scene-prompt"><div class="scene-num">Scene ' + (i + 1) + '</div><div class="prompt-block">' + String(s.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>' + sceneVo + '</div>';
+              var promptOnlyId = 'scene-prompt-text-' + i;
+              return '<div class="scene-prompt"><div class="scene-prompt-content"><div class="scene-num">Scene ' + (i + 1) + '</div><div class="prompt-block" id="' + promptOnlyId + '">' + String(s.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>' + sceneVo + '</div><button type="button" class="copy-btn copy-btn-sm" data-copy-target="' + promptOnlyId + '">Copy</button></div>';
             }).join('');
           }
           if (toggleBtn) {
@@ -603,6 +727,8 @@
         const stageHistoryEl = document.getElementById('detailStageHistory');
         const waitingBox = document.getElementById('waitingForClipsBox');
         const requiredList = document.getElementById('requiredFilesList');
+        const audioCard = document.getElementById('audioCard');
+        const audioEl = document.getElementById('audioPlayer');
         if (topicEl) topicEl.textContent = 'Loading…';
         if (statusCard) statusCard.style.display = 'block';
         if (resultCard) resultCard.style.display = 'none';
@@ -610,7 +736,7 @@
         function apply(data) {
           if (!data) return;
           if (topicEl) topicEl.textContent = data.topic || 'Project';
-          if (projectIdEl) projectIdEl.textContent = data.projectId || projectId;
+          if (projectIdEl) projectIdEl.textContent = 'Project ID: ' + (data.projectId || projectId);
           setStatusPill(statusPill, data.status);
           const showPrompts = ['script_generated', 'audio_generated', 'waiting_for_clips', 'assembly_done', 'error'].indexOf(data.status) !== -1;
           const promptsCardEl = document.getElementById('promptsCard');
@@ -637,6 +763,31 @@
             if (requiredList) requiredList.innerHTML = (data.requiredFiles || []).map((f) => '<li>' + f + '</li>').join('');
           } else {
             if (waitingBox) waitingBox.style.display = 'none';
+          }
+          if (audioEl && audioCard) {
+            const rawUrl = data.audioUrl || null;
+            if (rawUrl) {
+              const fullUrl = rawUrl.startsWith('http') ? rawUrl : getApiBase() + rawUrl;
+              const key = fullUrl.split('?')[0]; // stable part of URL
+              if (key !== currentAudioKey) {
+                const wasPlaying = !audioEl.paused && !audioEl.ended;
+                audioEl.src = fullUrl;
+                currentAudioUrl = fullUrl;
+                currentAudioKey = key;
+                if (wasPlaying) {
+                  audioEl.play().catch(() => {});
+                }
+              }
+              audioCard.style.display = 'block';
+            } else {
+              if (currentAudioUrl) {
+                audioEl.pause();
+                audioEl.removeAttribute('src');
+                currentAudioUrl = null;
+                currentAudioKey = null;
+              }
+              audioCard.style.display = 'none';
+            }
           }
           var videoEl = document.getElementById('video');
           var titleEl = document.getElementById('title');
@@ -748,8 +899,7 @@
           }
         };
 
-        document.getElementById('linkLogout').onclick = (e) => {
-          e.preventDefault();
+        document.getElementById('btnLogout').onclick = () => {
           setToken(null);
           setUserName(null);
           window.location.hash = '#/login';
@@ -760,11 +910,25 @@
         const topicSuggestionsEl = document.getElementById('topicSuggestions');
 
         if (suggestBtn && topicInput && topicSuggestionsEl) {
+          var overlayList = topicSuggestionsEl.querySelector('.suggestions-overlay-list');
+          function showOverlay(html) {
+            if (overlayList) overlayList.innerHTML = html;
+            topicSuggestionsEl.classList.add('is-visible');
+          }
+          function hideOverlay() {
+            topicSuggestionsEl.classList.remove('is-visible');
+            if (overlayList) overlayList.innerHTML = '';
+          }
+          document.addEventListener('click', function(e) {
+            if (!topicSuggestionsEl.classList.contains('is-visible')) return;
+            if (topicSuggestionsEl.contains(e.target) || suggestBtn.contains(e.target)) return;
+            hideOverlay();
+          });
           suggestBtn.onclick = async () => {
             suggestBtn.disabled = true;
             const originalText = suggestBtn.textContent;
             suggestBtn.textContent = 'Fetching…';
-            topicSuggestionsEl.textContent = '';
+            hideOverlay();
             try {
               const res = await authFetch('/api/topics/suggest', {
                 method: 'POST',
@@ -779,14 +943,13 @@
               seenTopics = seenTopics.concat(newOnes);
               topicInput.value = suggestedTopics[0] || topicInput.value || '';
               if (!newOnes.length) {
-                topicSuggestionsEl.textContent = 'No new topics this batch (all were already suggested). Click again for more.';
+                showOverlay('<span class="suggestions-message">No new topics this batch. Click again for more.</span>');
               } else {
-                topicSuggestionsEl.innerHTML = suggestedTopics
-                  .map(function(t, idx) {
-                    var cls = 'chip' + (idx === 0 ? ' selected' : '');
-                    return '<button type="button" class="' + cls + '" data-idx="' + idx + '">' + t.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') + '</button>';
-                  })
-                  .join('');
+                var chipsHtml = suggestedTopics.map(function(t, idx) {
+                  var cls = 'chip' + (idx === 0 ? ' selected' : '');
+                  return '<button type="button" class="' + cls + '" data-idx="' + idx + '">' + t.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') + '</button>';
+                }).join('');
+                showOverlay(chipsHtml);
                 topicSuggestionsEl.querySelectorAll('button[data-idx]').forEach(function(btn) {
                   btn.addEventListener('click', function() {
                     var i = parseInt(btn.getAttribute('data-idx'), 10);
@@ -798,7 +961,7 @@
                 });
               }
             } catch (e) {
-              topicSuggestionsEl.textContent = (e && e.message) || 'Topic suggestion failed';
+              showOverlay('<span class="suggestions-message err">' + ((e && e.message) || 'Topic suggestion failed') + '</span>');
             } finally {
               suggestBtn.disabled = false;
               suggestBtn.textContent = originalText;
@@ -898,16 +1061,43 @@
           }
         });
 
-        document.querySelectorAll('.copy-btn').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            const targetId = btn.getAttribute('data-copy-target');
-            const el = document.getElementById(targetId);
-            if (!el) return;
-            navigator.clipboard.writeText(el.value || '').then(() => {
-              btn.textContent = 'Copied';
-              setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-            }).catch(() => alert('Copy failed'));
-          });
+        function copyToClipboard(text) {
+          const str = (text || '').toString();
+          if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(str);
+          }
+          const textarea = document.createElement('textarea');
+          textarea.value = str;
+          textarea.style.position = 'fixed';
+          textarea.style.left = '-9999px';
+          textarea.style.top = '0';
+          document.body.appendChild(textarea);
+          textarea.focus();
+          textarea.select();
+          try {
+            const ok = document.execCommand('copy');
+            document.body.removeChild(textarea);
+            return ok ? Promise.resolve() : Promise.reject(new Error('execCommand failed'));
+          } catch (e) {
+            document.body.removeChild(textarea);
+            return Promise.reject(e);
+          }
+        }
+
+        document.body.addEventListener('click', (e) => {
+          const btn = e.target.closest('.copy-btn');
+          if (!btn) return;
+          e.preventDefault();
+          const targetId = btn.getAttribute('data-copy-target');
+          if (!targetId) return;
+          const el = document.getElementById(targetId);
+          if (!el) return;
+          const text = el.value != null ? el.value : (el.textContent || '').trim();
+          const originalLabel = btn.textContent;
+          copyToClipboard(text).then(() => {
+            btn.textContent = 'Copied';
+            setTimeout(() => { btn.textContent = originalLabel; }, 1500);
+          }).catch(() => alert('Copy failed'));
         });
 
         applyRoute();

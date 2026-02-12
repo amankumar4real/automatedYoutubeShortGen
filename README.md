@@ -259,7 +259,7 @@ If the file is missing, assembly runs as usual with no music.
 
 3. **Verify:** `curl -s https://YOUR-TUNNEL-URL/health` should return `{"ok":true}`. Use `pm2 status` and `pm2 logs shorts-api` on the server to check the backend.
 
-If the tunnel process stops, the URL changes; run `./deploy/03-tunnel.sh` again (or restart the `tunnel` container with Docker) to get a new one. For a stable hostname, use a Cloudflare account and a named tunnel or your own domain.
+If the tunnel process stops, the URL changes; run `./deploy/03-tunnel.sh` again (or restart the `tunnel` container with Docker) to get a new one. **Stable URL (no change on restart):** see [deploy/NAMED-TUNNEL.md](deploy/NAMED-TUNNEL.md) for Option A — Cloudflare Named Tunnel with a free/cheap domain.
 
 ---
 

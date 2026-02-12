@@ -128,10 +128,11 @@ router.get('/:projectId', async (req: AuthRequest, res: Response) => {
   const project = await getProjectByProjectId(projectId, userId);
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
-  const [scriptUrl, finalVideoUrlR2, youtubeMetaUrlR2] = await Promise.all([
+  const [scriptUrl, finalVideoUrlR2, youtubeMetaUrlR2, audioUrlR2] = await Promise.all([
     getAssetUrl(project.scriptKey),
     getAssetUrl(project.finalVideoKey),
-    getAssetUrl(project.youtubeMetaKey)
+    getAssetUrl(project.youtubeMetaKey),
+    project.audioKeys?.[0] ? getAssetUrl(project.audioKeys[0]) : Promise.resolve(null)
   ]);
   const outputDir = getProjectOutputDir(projectId);
   const finalVideoUrl =
@@ -154,6 +155,7 @@ router.get('/:projectId', async (req: AuthRequest, res: Response) => {
     scriptUrl,
     finalVideoUrl: finalVideoUrl ?? null,
     youtubeMetaUrl: youtubeMetaUrl ?? null,
+    audioUrl: audioUrlR2,
     requiredFiles: project.requiredFiles,
     errorMessage: project.errorMessage,
     updatedAt: project.updatedAt.toISOString(),

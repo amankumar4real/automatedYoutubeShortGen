@@ -49,7 +49,11 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: shorts-tunnel
     restart: unless-stopped
-    command: tunnel --url http://web:80
+    env_file: .env
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
+    # If TUNNEL_TOKEN is set (named tunnel), use it for a stable URL; else quick tunnel (random URL).
+    command: ["sh", "-c", "if [ -n \"$$TUNNEL_TOKEN\" ]; then exec cloudflared tunnel run --token $$TUNNEL_TOKEN; else exec cloudflared tunnel --url http://web:80; fi"]
     depends_on:
       - web
 
