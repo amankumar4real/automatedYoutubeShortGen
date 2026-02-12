@@ -3,12 +3,16 @@ services:
     image: mongo:7
     container_name: shorts-mongo
     restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME:-}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:-}
     ports:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      # When MONGO_INITDB_ROOT_* are set, auth is enabled: use credentials. Otherwise ping without auth.
+      test: ["CMD", "sh", "-c", "if [ -n \"$$MONGO_INITDB_ROOT_USERNAME\" ]; then mongosh -u \"$$MONGO_INITDB_ROOT_USERNAME\" -p \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")'; else mongosh --eval 'db.adminCommand(\"ping\")'; fi"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -23,7 +27,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=4000
-      - MONGODB_URI=mongodb://mongo:27017
+      # Use MONGODB_URI from .env (with auth: mongodb://user:pass@mongo:27017/shorts?authSource=admin)
       # Optional: set if you mount background music (see README)
       - BACKGROUND_MUSIC_PATH=/app/data/background_music/background_music.mp3
     volumes:

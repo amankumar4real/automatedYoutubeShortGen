@@ -60,6 +60,8 @@ export interface ProjectDoc {
   clipKeys?: string[];
   finalVideoKey?: string;
   youtubeMetaKey?: string;
+  segmentMapKey?: string;
+  segmentAlignmentKey?: string;
   requiredFiles?: string[];
   errorMessage?: string;
   createdAt: Date;

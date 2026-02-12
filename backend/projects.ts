@@ -53,6 +53,8 @@ export async function createProject(
     clipKeys: undefined,
     finalVideoKey: undefined,
     youtubeMetaKey: undefined,
+    segmentMapKey: undefined,
+    segmentAlignmentKey: undefined,
     requiredFiles: undefined,
     errorMessage: undefined,
     createdAt: now,
@@ -99,7 +101,7 @@ export async function listProjects(userId: string): Promise<ProjectDoc[]> {
 export async function updateProject(
   projectId: string,
   userId: string,
-  update: Partial<Pick<ProjectDoc, 'status' | 'currentStage' | 'stageHistory' | 'scriptKey' | 'audioKeys' | 'clipKeys' | 'finalVideoKey' | 'youtubeMetaKey' | 'requiredFiles' | 'errorMessage'>>
+  update: Partial<Pick<ProjectDoc, 'status' | 'currentStage' | 'stageHistory' | 'scriptKey' | 'audioKeys' | 'clipKeys' | 'finalVideoKey' | 'youtubeMetaKey' | 'segmentMapKey' | 'segmentAlignmentKey' | 'requiredFiles' | 'errorMessage'>>
 ): Promise<ProjectDoc | null> {
   const db = await getDb();
   const coll = db.collection<ProjectDoc>(PROJECTS_COLL);
@@ -135,6 +137,8 @@ export async function syncR2ToWorkspace(projectId: string, userId: string, keys:
   scriptKey?: string;
   audioKeys?: string[];
   clipKeys?: string[];
+  segmentMapKey?: string;
+  segmentAlignmentKey?: string;
 }): Promise<void> {
   const fs = await import('fs');
   const workspace = getProjectWorkspaceDir(projectId);
@@ -147,18 +151,28 @@ export async function syncR2ToWorkspace(projectId: string, userId: string, keys:
     await downloadToFile(keys.scriptKey, dest);
   }
   if (keys.audioKeys?.length) {
-    for (let i = 0; i < keys.audioKeys.length; i++) {
-      const dest = path.join(workspace, `audio_scene_${i}.mp4`);
-      await downloadToFile(keys.audioKeys[i], dest);
-    }
     const mainAudio = path.join(workspace, 'audio.mp3');
     if (keys.audioKeys[0]) await downloadToFile(keys.audioKeys[0], mainAudio);
+    for (let i = 1; i < keys.audioKeys.length; i++) {
+      const dest = path.join(workspace, `audio_scene_${i - 1}.mp3`);
+      await downloadToFile(keys.audioKeys[i], dest);
+    }
   }
   if (keys.clipKeys?.length) {
     for (let i = 0; i < keys.clipKeys.length; i++) {
       const dest = path.join(workspace, `clip_${i}.mp4`);
       await downloadToFile(keys.clipKeys[i], dest);
     }
+  }
+  if (keys.segmentMapKey) {
+    const outputDir = getProjectOutputDir(projectId);
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+    await downloadToFile(keys.segmentMapKey, path.join(outputDir, 'clip_segment_map.json'));
+  }
+  if (keys.segmentAlignmentKey) {
+    const outputDir = getProjectOutputDir(projectId);
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+    await downloadToFile(keys.segmentAlignmentKey, path.join(outputDir, 'segment_alignment.json'));
   }
 }
 
@@ -193,10 +207,23 @@ export async function uploadWorkspaceToR2(
     if (k) out.scriptKey = k;
   }
   const audioPath = path.join(workspaceDir, 'audio.mp3');
+  const audioKeys: string[] = [];
   if (fs.existsSync(audioPath)) {
     const k = await uploadProjectFile(userId, projectId, 'audio.mp3', audioPath);
-    if (k) out.audioKeys = [k];
+    if (k) audioKeys.push(k);
   }
+  let audioSceneIndex = 0;
+  while (fs.existsSync(path.join(workspaceDir, `audio_scene_${audioSceneIndex}.mp3`))) {
+    const k = await uploadProjectFile(
+      userId,
+      projectId,
+      `audio_scene_${audioSceneIndex}.mp3`,
+      path.join(workspaceDir, `audio_scene_${audioSceneIndex}.mp3`)
+    );
+    if (k) audioKeys.push(k);
+    audioSceneIndex += 1;
+  }
+  if (audioKeys.length) out.audioKeys = audioKeys;
   let i = 0;
   const clipKeys: string[] = [];
   while (fs.existsSync(path.join(workspaceDir, `clip_${i}.mp4`))) {

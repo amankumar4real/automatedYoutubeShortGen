@@ -40,8 +40,11 @@ XAI_API_KEY=...             # Only if MANUAL_GROK=false (Grok API for clips)
 For the API with auth and projects:
 
 ```env
-MONGODB_URI=mongodb://localhost:27017   # or Atlas connection string
+MONGODB_URI=mongodb://localhost:27017   # or Atlas connection string; with Docker auth use mongodb://USER:PASS@mongo:27017/shorts?authSource=admin
 MONGODB_DB_NAME=shorts
+# MongoDB auth (Docker only): set both to enable auth in the mongo container; use same user/pass in MONGODB_URI
+MONGO_INITDB_ROOT_USERNAME=             # e.g. admin
+MONGO_INITDB_ROOT_PASSWORD=             # strong password
 JWT_SECRET=change-me-in-production      # use a strong secret in production
 ```
 
@@ -61,6 +64,8 @@ BACKGROUND_MUSIC_PATH=temp/background_music.mp3
 RUN_STEP=1
 PORT=4000
 ```
+
+**MongoDB auth (Docker):** To run Mongo with authentication, set `MONGO_INITDB_ROOT_USERNAME` and `MONGO_INITDB_ROOT_PASSWORD` in `.env`, and set `MONGODB_URI=mongodb://USER:PASS@mongo:27017/shorts?authSource=admin` (same user/pass). The root user is created only when the data volume is **empty**; if you already have data, create a user manually in `mongosh` or start with a fresh volume (data loss).
 
 ---
 

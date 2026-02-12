@@ -17,6 +17,16 @@ const XAI_API_KEY = process.env.XAI_API_KEY;
 const ELEVEN_KEY = process.env.ELEVEN_API_KEY;
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 
+// Clip length is fixed: 6s or 10s only (your generator constraint). Drives scene duration and voiceover length.
+const TARGET_CLIP_SECONDS = (() => {
+  const raw = process.env.TARGET_CLIP_SECONDS ?? '10';
+  const n = parseInt(raw, 10);
+  if (n === 6 || n === 10) return n;
+  console.warn(`[MAIN] TARGET_CLIP_SECONDS must be 6 or 10 (got ${raw}). Using 10.`);
+  return 10;
+})();
+const SCENE_DURATION_DEFAULT = TARGET_CLIP_SECONDS;
+
 function log(step: string, message: string) {
   console.log(`[${step}] ${message}`);
 }
@@ -118,36 +128,399 @@ function getVideoDurationSeconds(videoPath: string): Promise<number> {
   });
 }
 
-const SCENE_DURATION_DEFAULT = 5;
+// SCENE_DURATION_DEFAULT is set from TARGET_CLIP_SECONDS above (6 or 10)
 
-// Trim or pad each clip to the script's per-scene duration so clip boundaries align with narration beats.
-async function prepareClipsToSceneDurations(
+type ClipSegment = {
+  clipIndex: number;
+  text: string;
+  durationSec: number;
+  startSec: number;
+  endSec: number;
+  source: 'scene-driven' | 'clip-driven';
+  sourceClipDurationSec?: number;
+};
+
+type ClipSegmentMap = {
+  mode: 'scene-driven' | 'clip-driven';
+  clipCount: number;
+  audioDurationSec: number;
+  segments: ClipSegment[];
+};
+
+type SegmentAlignmentCheck = {
+  coverageRatio: number;
+  durationDeltaSec: number;
+  emptySegmentCount: number;
+  availableClipCount: number;
+  requiredClipCount: number;
+  maxStretchRatio: number;
+  /** Segment index that had max stretch (for clip-driven block message). */
+  stretchSegmentIndex?: number;
+};
+
+type SegmentAlignmentReport = {
+  mode: 'scene-driven' | 'clip-driven';
+  passed: boolean;
+  reasons: string[];
+  checks: SegmentAlignmentCheck;
+  segments: ClipSegment[];
+};
+
+function getContiguousClipIndices(tempDir: string): number[] {
+  const indices: number[] = [];
+  let i = 0;
+  while (fs.existsSync(path.join(tempDir, `clip_${i}.mp4`))) {
+    indices.push(i);
+    i += 1;
+  }
+  return indices;
+}
+
+function splitSentences(text: string): string[] {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
+  const chunks = normalized
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (chunks.length > 0) return chunks;
+  return [normalized];
+}
+
+function splitTextEvenlyByWords(text: string, count: number): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return Array.from({ length: count }, () => '');
+  const out: string[] = [];
+  let cursor = 0;
+  for (let i = 0; i < count; i++) {
+    const remainingWords = words.length - cursor;
+    const remainingSlots = count - i;
+    const take = Math.max(1, Math.ceil(remainingWords / remainingSlots));
+    out.push(words.slice(cursor, cursor + take).join(' '));
+    cursor += take;
+  }
+  return out;
+}
+
+function splitVoiceoverByClipCount(voiceover: string, clipCount: number): string[] {
+  if (clipCount <= 0) return [];
+  const sentences = splitSentences(voiceover);
+  if (sentences.length === 0) return Array.from({ length: clipCount }, () => '');
+  if (sentences.length <= clipCount) {
+    const byWords = splitTextEvenlyByWords(voiceover, clipCount);
+    return byWords.map((seg) => seg.trim());
+  }
+  const sentenceWeights = sentences.map((s) => s.trim().split(/\s+/).filter(Boolean).length);
+  const totalWeight = sentenceWeights.reduce((sum, w) => sum + w, 0);
+  const targetWeight = Math.max(1, totalWeight / clipCount);
+  const segments: string[] = [];
+  let cursor = 0;
+  let runningWeight = 0;
+  for (let i = 0; i < clipCount; i++) {
+    const start = cursor;
+    const remainingSegments = clipCount - i;
+    const remainingSentences = sentences.length - cursor;
+    if (i === clipCount - 1) {
+      segments.push(sentences.slice(cursor).join(' ').trim());
+      break;
+    }
+    runningWeight = 0;
+    while (cursor < sentences.length) {
+      const stillNeededForOthers = (sentences.length - (cursor + 1)) >= (remainingSegments - 1);
+      const nextWeight = sentenceWeights[cursor];
+      const projected = runningWeight + nextWeight;
+      if (runningWeight > 0 && projected > targetWeight && stillNeededForOthers) {
+        break;
+      }
+      runningWeight = projected;
+      cursor += 1;
+      if (!stillNeededForOthers) break;
+      const nearTarget = runningWeight >= targetWeight * 0.85;
+      if (nearTarget) break;
+    }
+    if (cursor === start) cursor += 1;
+    segments.push(sentences.slice(start, cursor).join(' ').trim());
+    if (remainingSentences <= remainingSegments) {
+      while (segments.length < clipCount && cursor < sentences.length) {
+        segments.push(sentences[cursor]);
+        cursor += 1;
+      }
+      break;
+    }
+  }
+  if (segments.length < clipCount) {
+    const joined = segments.join(' ').trim();
+    return splitTextEvenlyByWords(joined, clipCount).map((seg) => seg.trim());
+  }
+  if (segments.length > clipCount) {
+    const head = segments.slice(0, clipCount - 1);
+    head.push(segments.slice(clipCount - 1).join(' ').trim());
+    return head;
+  }
+  return segments;
+}
+
+function distributeDurationsByWeight(totalSec: number, weights: number[]): number[] {
+  if (!Number.isFinite(totalSec) || totalSec <= 0 || weights.length === 0) return [];
+  const safeWeights = weights.map((w) => (Number.isFinite(w) && w > 0 ? w : 1));
+  const weightSum = safeWeights.reduce((sum, w) => sum + w, 0);
+  const raw = safeWeights.map((w) => (w / weightSum) * totalSec);
+  const rounded = raw.map((v) => Math.max(0.1, Number(v.toFixed(3))));
+  const roundedSum = rounded.reduce((sum, v) => sum + v, 0);
+  const correction = Number((totalSec - roundedSum).toFixed(3));
+  rounded[rounded.length - 1] = Math.max(0.1, Number((rounded[rounded.length - 1] + correction).toFixed(3)));
+  return rounded;
+}
+
+function withTimeline(
+  segments: Array<{ clipIndex: number; text: string; durationSec: number; source: 'scene-driven' | 'clip-driven'; sourceClipDurationSec?: number }>
+): ClipSegment[] {
+  let cursor = 0;
+  return segments.map((seg) => {
+    const startSec = Number(cursor.toFixed(3));
+    cursor += seg.durationSec;
+    const endSec = Number(cursor.toFixed(3));
+    return {
+      clipIndex: seg.clipIndex,
+      text: seg.text,
+      durationSec: Number(seg.durationSec.toFixed(3)),
+      startSec,
+      endSec,
+      source: seg.source,
+      sourceClipDurationSec: seg.sourceClipDurationSec
+    };
+  });
+}
+
+function normalizeForCoverage(text: string): string {
+  return text.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function computeCoverageRatio(fullText: string, segmentTexts: string[]): number {
+  const full = normalizeForCoverage(fullText);
+  const joined = normalizeForCoverage(segmentTexts.join(' '));
+  if (!full) return 1;
+  return Math.min(1, joined.length / full.length);
+}
+
+function writeSegmentMap(outputDir: string, map: ClipSegmentMap): void {
+  const segmentMapPath = path.join(outputDir, 'clip_segment_map.json');
+  fs.writeFileSync(segmentMapPath, JSON.stringify(map, null, 2));
+}
+
+function writeSegmentAlignment(outputDir: string, report: SegmentAlignmentReport): void {
+  const alignmentPath = path.join(outputDir, 'segment_alignment.json');
+  fs.writeFileSync(alignmentPath, JSON.stringify(report, null, 2));
+}
+
+function buildAlignmentChecks(
+  mode: 'scene-driven' | 'clip-driven',
+  scriptVoiceover: string,
+  segments: ClipSegment[],
+  mergedAudioSec: number,
+  availableClipCount: number,
+  requiredClipCount: number
+): SegmentAlignmentReport {
+  const sumDur = segments.reduce((sum, s) => sum + s.durationSec, 0);
+  const emptySegmentCount = segments.filter((s) => !s.text.trim()).length;
+  const stretchRatios = segments.map((s) => {
+    const base = s.sourceClipDurationSec && s.sourceClipDurationSec > 0 ? s.sourceClipDurationSec : s.durationSec;
+    return base > 0 ? s.durationSec / base : 1;
+  });
+  const maxStretchRatioVal = Math.max(1, ...stretchRatios);
+  const stretchSegmentIndex = stretchRatios.findIndex((r) => r === maxStretchRatioVal);
+  const checks: SegmentAlignmentCheck = {
+    coverageRatio: Number(computeCoverageRatio(scriptVoiceover, segments.map((s) => s.text)).toFixed(4)),
+    durationDeltaSec: Number(Math.abs(sumDur - mergedAudioSec).toFixed(4)),
+    emptySegmentCount,
+    availableClipCount,
+    requiredClipCount,
+    maxStretchRatio: Number(maxStretchRatioVal.toFixed(4)),
+    ...(mode === 'clip-driven' && stretchSegmentIndex >= 0 ? { stretchSegmentIndex } : undefined)
+  };
+  const reasons: string[] = [];
+  if (mode === 'clip-driven' && checks.coverageRatio < 0.98) reasons.push('coverage_below_threshold');
+  if (checks.durationDeltaSec > 0.35) reasons.push('duration_delta_too_high');
+  if (checks.emptySegmentCount > 0) reasons.push('empty_segment_text');
+  // In scene-lock we skip stretch check (semantic mapping is correct; slow-mo acceptable).
+  if (mode === 'clip-driven' && checks.maxStretchRatio > 1.8) {
+    reasons.push(
+      stretchSegmentIndex >= 0
+        ? `stretch_ratio_too_high segment_${stretchSegmentIndex}_ratio_${checks.maxStretchRatio}`
+        : 'stretch_ratio_too_high'
+    );
+  }
+  if (mode === 'clip-driven' && checks.availableClipCount < checks.requiredClipCount) {
+    reasons.push('insufficient_clip_count_for_context');
+  }
+  return {
+    mode,
+    passed: reasons.length === 0,
+    reasons,
+    checks,
+    segments
+  };
+}
+
+function ensureAlignmentOrBlock(
+  report: SegmentAlignmentReport,
+  outputDir: string,
+  scenesLength: number
+): void {
+  writeSegmentAlignment(outputDir, report);
+  if (report.passed) return;
+  const primaryReason = report.reasons[0] ?? 'alignment_check_failed';
+  let hint: string | undefined;
+  if (report.mode === 'clip-driven') {
+    if (primaryReason.startsWith('stretch_ratio_too_high') || primaryReason.includes('stretch')) {
+      hint = 'Upload one more clip so clip count matches scene count, or use shorter narration per clip.';
+    } else if (primaryReason === 'coverage_below_threshold') {
+      hint = 'Upload one more clip so clip count matches scene count, or use shorter narration per clip.';
+    } else if (primaryReason === 'insufficient_clip_count_for_context') {
+      hint = `Upload ${report.checks.requiredClipCount - report.checks.availableClipCount} more clip(s) so clip count matches scene count (${report.checks.requiredClipCount} scenes).`;
+    } else if (primaryReason === 'empty_segment_text') {
+      hint = 'Ensure every scene has voiceover text, or upload clips that match scene count.';
+    }
+  }
+  const payload = {
+    reason: primaryReason,
+    reasons: report.reasons,
+    ...(hint ? { hint } : undefined),
+    requiredFiles: Array.from({ length: Math.max(scenesLength, report.checks.requiredClipCount) }, (_, i) => `clip_${i}.mp4`)
+  };
+  throw new Error(`ALIGNMENT_BLOCKED:${JSON.stringify(payload)}`);
+}
+
+async function writeAudioFromGeneratedStream(audioPath: string, audioStream: unknown): Promise<void> {
+  const audioFile = fs.createWriteStream(audioPath);
+  if (typeof (audioStream as { pipe?: unknown }).pipe === 'function') {
+    await new Promise<void>((resolve, reject) => {
+      (audioStream as NodeJS.ReadableStream).pipe(audioFile);
+      audioFile.on('finish', () => resolve());
+      audioFile.on('error', reject);
+    });
+    return;
+  }
+  const reader = (audioStream as ReadableStream<Uint8Array>).getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      audioFile.write(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  audioFile.end();
+  await new Promise<void>((resolve, reject) => {
+    audioFile.on('finish', () => resolve());
+    audioFile.on('error', reject);
+  });
+}
+
+async function concatAudioFiles(audioFiles: string[], outputPath: string): Promise<void> {
+  const listPath = path.join(path.dirname(outputPath), 'audio_files.txt');
+  const listContent = audioFiles.map((p) => `file '${p.replace(/\\/g, '/')}'`).join('\n');
+  fs.writeFileSync(listPath, listContent);
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg()
+      .input(listPath)
+      .inputOptions(['-f concat', '-safe 0'])
+      .outputOptions(['-c copy'])
+      .save(outputPath)
+      .on('end', () => resolve())
+      .on('error', (err: Error) => reject(err));
+  });
+}
+
+async function regenerateSegmentAudio(
   tempDir: string,
-  scenes: Array<{ prompt: string; duration?: number }>
+  segments: ClipSegment[]
+): Promise<ClipSegment[]> {
+  validateApiKeysForStep('audio');
+  const segmentAudioPaths: string[] = [];
+  const measuredDurations: number[] = [];
+  const runSegment = async (i: number): Promise<void> => {
+    const rawText = segments[i].text.trim();
+    const text = rawText || '.'; // Empty segment: use placeholder so TTS returns minimal audio
+    const segmentAudioPath = path.join(tempDir, `audio_scene_${i}.mp3`);
+    const requestPayload: Record<string, unknown> = {
+      voice: 'PlmstgXEUNQWiPyS27i2',
+      text,
+      model_id: 'eleven_multilingual_v2',
+      voice_settings: {
+        stability: 0.5,
+        similarity_boost: 0.4,
+        style: 0,
+        use_speaker_boost: true,
+        speed: 0.99
+      }
+    };
+    if (i > 0) requestPayload.previous_text = segments[i - 1].text;
+    if (i < segments.length - 1) requestPayload.next_text = segments[i + 1].text;
+    const stream = await eleven.generate(requestPayload as never);
+    await writeAudioFromGeneratedStream(segmentAudioPath, stream);
+    segmentAudioPaths.push(segmentAudioPath);
+    measuredDurations.push(await getAudioDurationSeconds(segmentAudioPath));
+  };
+  for (let i = 0; i < segments.length; i++) {
+    try {
+      await runSegment(i);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log('AUDIO', `Segment ${i} TTS failed: ${msg}`);
+      try {
+        await runSegment(i);
+      } catch (retryErr) {
+        const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        for (const p of segmentAudioPaths) {
+          try {
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+          } catch {
+            /* ignore */
+          }
+        }
+        throw new Error(`Segment ${i} TTS failed: ${retryMsg}`);
+      }
+    }
+  }
+  await concatAudioFiles(segmentAudioPaths, path.join(tempDir, 'audio.mp3'));
+  const withMeasured = withTimeline(
+    segments.map((seg, idx) => ({
+      clipIndex: seg.clipIndex,
+      text: seg.text,
+      durationSec: Math.max(0.1, measuredDurations[idx] || seg.durationSec),
+      source: seg.source
+    }))
+  );
+  return withMeasured;
+}
+
+// Trim or pad each clip to target durations so clip boundaries align with narration beats.
+async function prepareClipsToTargetDurations(
+  tempDir: string,
+  segments: ClipSegment[]
 ): Promise<string[]> {
   const trimmedPaths: string[] = [];
-  for (let i = 0; i < scenes.length; i++) {
-    const audioScenePath = path.join(tempDir, `audio_scene_${i}.mp3`);
-    const targetSec = fs.existsSync(audioScenePath)
-      ? await getAudioDurationSeconds(audioScenePath)
-      : (scenes[i].duration ?? SCENE_DURATION_DEFAULT);
-    const clipPath = path.join(tempDir, `clip_${i}.mp4`);
-    const outPath = path.join(tempDir, `trimmed_${i}.mp4`);
+  for (const seg of segments) {
+    const targetSec = Math.max(0.1, seg.durationSec);
+    const clipPath = path.join(tempDir, `clip_${seg.clipIndex}.mp4`);
+    const outPath = path.join(tempDir, `trimmed_${seg.clipIndex}.mp4`);
     const dur = await getVideoDurationSeconds(clipPath);
-    const padSec = Math.max(0, targetSec - Math.min(dur, targetSec));
-    const vf = `trim=duration=${targetSec},setpts=PTS-STARTPTS`;
+    const speedRatio = dur > 0 ? targetSec / dur : 1;
+    const adjustedSetPts = speedRatio > 1
+      ? `setpts=${speedRatio}*PTS`
+      : 'setpts=PTS-STARTPTS';
+    const vf = `trim=duration=${dur > 0 ? Math.min(dur, targetSec) : targetSec},${adjustedSetPts},trim=duration=${targetSec},setpts=PTS-STARTPTS`;
     await new Promise<void>((resolve, reject) => {
       const chain = ffmpeg();
       chain.input(clipPath);
-      if (padSec > 0) {
-        chain.inputOptions(['-stream_loop -1']);
-      }
       chain
         .noAudio()
         .videoFilters(vf)
         .outputOptions(['-c:v libx264', '-pix_fmt yuv420p'])
         .output(outPath)
-        .on('start', () => log('FFMPEG', `Clip ${i}: trim/pad to ${targetSec}s (was ${dur.toFixed(1)}s)`))
+        .on('start', () => log('FFMPEG', `Clip ${seg.clipIndex}: trim/stretch to ${targetSec}s (was ${dur.toFixed(1)}s)`))
         .on('end', () => resolve())
         .on('error', (err: Error) => reject(err))
         .run();
@@ -198,6 +571,18 @@ function validateScriptData(data: unknown): data is ScriptData {
   return d.scenes.every((s: unknown) => s && typeof s === 'object' && typeof (s as Record<string, unknown>).prompt === 'string');
 }
 
+/** Fail early if any scene has empty or whitespace-only voiceover (needed for scene-lock and TTS). */
+function validateSceneVoiceovers(scriptData: ScriptData): void {
+  const bad = scriptData.scenes
+    .map((s, i) => ({ i, v: String((s as { voiceover?: string }).voiceover ?? '').trim() }))
+    .filter(({ v }) => !v);
+  if (bad.length > 0) {
+    const indices = bad.map(({ i }) => i).join(', ');
+    log('MAIN', `Script invalid: every scene must have non-empty "voiceover". Missing or empty in scene(s): ${indices}.`);
+    process.exit(1);
+  }
+}
+
 function loadScriptFromTemp(): ScriptData {
   const scriptPath = path.join(TEMP_DIR, 'script.json');
   if (!fs.existsSync(scriptPath)) {
@@ -220,11 +605,104 @@ function loadScriptFromTemp(): ScriptData {
     log('MAIN', 'temp/script.json invalid: need voiceover and scenes.');
     process.exit(1);
   }
+  validateSceneVoiceovers(raw);
   return raw;
 }
 
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 const eleven = new ElevenLabsClient({ apiKey: ELEVEN_KEY });
+
+const CURRENT_DEVELOPMENTS_FILE = path.join(TEMP_DIR, 'current_developments.txt');
+
+function topicLikelyNeedsRecentDevelopments(topic: string): boolean {
+  const t = topic.toLowerCase();
+  const keywords = [
+    'files', 'case', 'trial', 'court', 'lawsuit', 'hearing', 'investigation',
+    'election', 'war', 'conflict', 'sanction', 'breaking', 'latest', 'new details',
+    'exposed', 'epstein'
+  ];
+  return keywords.some((k) => t.includes(k));
+}
+
+async function getCurrentDevelopmentsContext(topic: string): Promise<string> {
+  if (fs.existsSync(CURRENT_DEVELOPMENTS_FILE)) {
+    const manual = fs.readFileSync(CURRENT_DEVELOPMENTS_FILE, 'utf-8').trim();
+    if (manual) return manual;
+  }
+  if (!topicLikelyNeedsRecentDevelopments(topic)) return '';
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: 'You extract recent, high-confidence developments for documentary scripting. If uncertain, return an empty object. No speculation.'
+        },
+        {
+          role: 'user',
+          content: [
+            `Topic: "${topic}"`,
+            `Today: ${today}`,
+            'Return ONLY valid JSON: {"developments":["..."]}',
+            'Rules:',
+            '- 0 to 4 concise developments.',
+            '- Prefer date/period references when known.',
+            '- Exclude rumors, uncertain claims, or unverifiable details.',
+            '- If no high-confidence updates, return {"developments":[]}.'
+          ].join('\n')
+        }
+      ],
+      response_format: { type: 'json_object' }
+    });
+    const content = completion.choices[0].message.content;
+    if (!content) return '';
+    const parsed = JSON.parse(content) as { developments?: string[] };
+    const list = Array.isArray(parsed.developments)
+      ? parsed.developments.map((d) => String(d).trim()).filter(Boolean)
+      : [];
+    if (!list.length) return '';
+    return list.map((d) => `- ${d}`).join('\n');
+  } catch {
+    return '';
+  }
+}
+
+/** When a scene's TTS is longer than its clip, optionally shorten voiceover via LLM and re-run TTS (one pass). */
+const AUTO_SHORTEN_VOICEOVER = process.env.AUTO_SHORTEN_VOICEOVER === '1' || process.env.AUTO_SHORTEN_VOICEOVER === 'true';
+
+async function shortenVoiceoversToFit(
+  items: Array<{ sceneIndex: number; voiceover: string; maxSec: number }>
+): Promise<string[]> {
+  if (items.length === 0) return [];
+  validateApiKeysForStep('script');
+  const list = items
+    .map(
+      (x) =>
+        `Scene ${x.sceneIndex}: max ${x.maxSec.toFixed(1)}s spoken. Current: "${x.voiceover.slice(0, 300)}${x.voiceover.length > 300 ? '…' : ''}"`
+    )
+    .join('\n');
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You shorten narration so it fits a strict time limit when spoken (~2.5 words per second). Keep the same meaning and tone. Return ONLY valid JSON: { "shortened": ["text for scene 0", "text for scene 1", ...] } in the same order as the scenes listed. No markdown.'
+      },
+      {
+        role: 'user',
+        content: `Shorten each scene voiceover so it can be spoken within the given max seconds (~${2.5} words per second). Preserve facts and tone.\n\n${list}\n\nReturn JSON: { "shortened": [ "shortened voiceover 1", "shortened voiceover 2", ... ] }`
+      }
+    ],
+    response_format: { type: 'json_object' }
+  });
+  const content = completion.choices[0].message.content;
+  if (!content) throw new Error('OpenAI returned empty response for voiceover shorten');
+  const parsed = JSON.parse(content) as { shortened?: string[] };
+  const shortened = Array.isArray(parsed.shortened) ? parsed.shortened : [];
+  return items.map((_, i) => (typeof shortened[i] === 'string' && shortened[i].trim() ? shortened[i].trim() : items[i].voiceover));
+}
 
 async function generateYouTubeMetadata(topic: string, scriptData: ScriptData) {
   validateApiKeysForStep('script');
@@ -296,42 +774,67 @@ async function getScript(topic: string): Promise<ScriptData> {
   validateTopic(topic);
   validateApiKeysForStep('script');
   log('SCRIPT', `Starting script generation for topic: "${topic}"`);
+  const currentDevelopments = await getCurrentDevelopmentsContext(topic);
+  const developmentsInstruction = currentDevelopments
+    ? `CURRENT DEVELOPMENTS (use only if they naturally fit this story):
+${currentDevelopments}
+
+INTEGRATION RULES FOR DEVELOPMENTS:
+- Blend 1-2 relevant updates naturally into the narration (do not dump them as a list).
+- If a development is uncertain, clearly signal uncertainty.
+- Do not invent dates, names, filings, or quotes.
+- Keep the script coherent: developments should support the main narrative arc, not derail it.
+`
+    : 'CURRENT DEVELOPMENTS: none provided. Do not invent recent updates.';
+  const clipSec = TARGET_CLIP_SECONDS;
+  const wordsPerScene = clipSec <= 6 ? 18 : 40; // ~3 w/s for 6s, ~4 w/s for 10s
   const prompt = TEST_MODE
-    ? `Create a single 10 second test clip about: "${topic}".
+    ? `Create a single ${clipSec} second test clip about: "${topic}".
        Return JSON with ONE scene only.
-       - The top-level "voiceover" should contain the full 10 second narration (natural, under 40 words).
+       - The top-level "voiceover" should contain the full ${clipSec} second narration (natural, under ${wordsPerScene} words).
        - The scene "voiceover" should be the same narration or a closely matching subset (1–3 sentences) that will be spoken while this scene is shown.
        - Scene prompt must end with "9:16 aspect ratio, vertical portrait format".
        {
-         "voiceover": "Short natural narration, under 40 words.",
+         "voiceover": "Short natural narration, under ${wordsPerScene} words.",
          "scenes": [
            {
              "prompt": "Simple visual for video AI that clearly matches the narration. 9:16 aspect ratio, vertical portrait format.",
-             "voiceover": "Lines spoken for this 10 second scene.",
-             "duration": 10
+             "voiceover": "Lines spoken for this ${clipSec} second scene.",
+             "duration": ${clipSec}
            }
          ]
        }`
     : `Write a YouTube Short script about: "${topic}".
 
        STYLE (follow this closely):
-       - Natural, conversational narration—like a documentary or a gripping story. No stiff or vague phrasing.
+       - FACT-FIRST documentary narration. Do not write like a poem, thriller novel, or dramatic monologue.
+       - Prioritize dense, specific, verifiable facts over mood or cinematic prose.
+       - Use crisp, direct language. No metaphors, no flowery adjectives, no filler transitions.
        - Open with a HOOK: a specific year or moment, a name, and what they did (e.g. "In 1974, a woman named Marina Abramović walked into a gallery to do a performance that would shock the world.").
-       - Pack in CONCRETE DETAIL: real names, numbers, places, objects, and clear actions. List specific items (e.g. "72 objects, including scissors, a whip, and even a loaded gun"). Describe what actually happened in order—not "things got intense" but "in the third hour her garments were cut off by a man with a sharp blade."
+       - Pack in CONCRETE DETAIL: real names, numbers, places, dates, documents, and clear actions. Prefer unusual or surprising facts whenever true.
+       - Maximize "crazy facts" density: every sentence should include at least one concrete factual element (date, count, location, named person, record, quote, filing, or physical detail).
        - Build chronologically or by clear beats. The story should ESCALATE: start with a simple hook, then reveal increasingly intense or strange details, ending on a sharp, memorable line.
        - Focus on 1–3 very specific, vivid moments or actions, not just a summary. Like in this example (DO NOT copy, only imitate the style):
          "In 1974, a woman named Marina Abramović walked into a gallery, to do a performance that would shock the world. Known as 'Rhythm 0' Abramović invited participants to do anything they desired to her for 6 hours using 72 objects, including scissors, a whip, and even a loaded gun. Everything started out calmly but soon things started to heat up as in the third hour all of her garments were cut off by a man with a sharp blade. This was just the beginning as within the next hour her throat was slit so that her blood could be sucked..."
        - Avoid flat summaries like "their bodies were found later" or "it remains a mystery". Instead, zoom into one concrete, unsettling scene or turning point and describe what actually happened.
-       - No filler. Every sentence should add a fact, an image, or tension.
+       - No filler. Every sentence should add new factual information.
+       - If a detail is uncertain or disputed, mark it briefly (e.g. "alleged", "reported", "according to court filings").
+
+       ${developmentsInstruction}
 
       RULES:
-       - Voiceover (top-level): MAX 900 characters including spaces. Write the full narration in "voiceover" as one continuous script.
-       - Scenes: 6 to 12 scenes, each "duration": 5. One video clip will be generated per scene.
-       - Each scene MUST also include a "voiceover" field: the specific lines being spoken during that scene (1–3 sentences). If you concatenate all scene.voiceover strings in order, it should roughly match the full top-level "voiceover".
-       - Scene prompts must be IN-DEPTH and DETAILED (2–4 sentences each): describe setting, lighting, camera angle, mood, key objects or actions, and period-appropriate details. Every prompt MUST end with: "9:16 aspect ratio, vertical portrait format" so the video is correct for Shorts. Example: "Dim 1970s white gallery space, single woman in neutral clothes standing motionless beside a long table. On the table lie 72 objects including scissors, a whip, roses, and a loaded gun. Harsh overhead lights, tense stillness, spectators visible in soft focus at the edges. Documentary style, cinematic. 9:16 aspect ratio, vertical portrait format." No text or captions in the visual.
+       - Each clip is exactly ${clipSec} seconds. Voiceover (top-level): MAX 900 characters. Write the full narration in "voiceover" as one continuous script.
+       - Scenes: 6 to 12 scenes, each "duration": ${clipSec}. One video clip will be generated per scene; each clip is exactly ${clipSec} seconds (you cannot use other lengths).
+       - Each scene MUST include a "voiceover" field: the lines spoken during that scene. Each scene's voiceover must be speakable in ${clipSec} seconds (about ${wordsPerScene} words per scene max). If you concatenate all scene.voiceover strings in order, they should roughly match the full top-level "voiceover".
+       - Scene prompts must be IN-DEPTH and DETAILED (2–4 sentences each): describe setting, lighting, camera angle, mood, key objects or actions, and period-appropriate details.
+       - CONTINUITY: scene N should visually connect with scene N-1 using shared subject, location progression, or evolving action so clips can be stitched without context loss.
+       - ART DIRECTION: include one clear camera intent (close-up / medium / wide / overhead / tracking), one motion intent (static / slow push / dolly / pan), and one aesthetic anchor (palette, texture, era-specific styling). Avoid generic AI wording like "cinematic masterpiece" without specifics.
+       - DARK VISUAL LANGUAGE IS MANDATORY: every scene must feel dark in nature (low-key lighting, heavy shadows, moody contrast, unsettling atmosphere) while staying realistic and coherent with facts.
+       - Make each clip feel unique and alive: distinctive composition, concrete physical details, and non-repetitive visual motifs across scenes.
+       - Every prompt MUST end with: "9:16 aspect ratio, vertical portrait format". No text or captions in the visual.
 
        Return ONLY valid JSON:
-       { "voiceover": "Full natural script, under 900 characters.", "scenes": [ { "prompt": "In-depth 2–4 sentence visual description ending with '9:16 aspect ratio, vertical portrait format'", "voiceover": "Lines spoken during this scene.", "duration": 5 }, ... ] }`;
+       { "voiceover": "Full natural script, under 900 characters.", "scenes": [ { "prompt": "In-depth 2–4 sentence visual description ending with '9:16 aspect ratio, vertical portrait format'", "voiceover": "Lines spoken during this scene (max ~${wordsPerScene} words).", "duration": ${clipSec} }, ... ] }`;
   const completion = await openai.chat.completions.create({
     model: "gpt-4o",
     messages: [
@@ -348,12 +851,67 @@ async function getScript(topic: string): Promise<ScriptData> {
     log('SCRIPT', 'Invalid script: need voiceover (string) and scenes (non-empty array with .prompt).');
     throw new Error('Invalid script structure from API');
   }
+  validateSceneVoiceovers(raw);
   if (raw.voiceover.length > 900) {
     log('SCRIPT', `Warning: voiceover is ${raw.voiceover.length} chars (max 900). Truncating.`);
     raw.voiceover = raw.voiceover.slice(0, 897) + '…';
   }
-  log('SCRIPT', `Done. Voiceover: ${raw.voiceover.length} chars, scenes: ${raw.scenes.length} (total video ~${raw.scenes.length * 5}s)`);
+  log('SCRIPT', `Done. Voiceover: ${raw.voiceover.length} chars, scenes: ${raw.scenes.length} (total video ~${raw.scenes.length * TARGET_CLIP_SECONDS}s, ${TARGET_CLIP_SECONDS}s per clip)`);
   return raw;
+}
+
+function ensureVerticalPromptSuffix(prompt: string): string {
+  const trimmed = (prompt || '').trim();
+  const suffix = '9:16 aspect ratio, vertical portrait format';
+  if (!trimmed) return suffix;
+  if (trimmed.toLowerCase().includes('9:16 aspect ratio, vertical portrait format')) return trimmed;
+  const normalized = trimmed.replace(/[.\s]+$/, '');
+  return `${normalized}. ${suffix}`;
+}
+
+function summarizeContextLine(text: string, maxWords = 18): string {
+  const words = (text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  if (!words.length) return '';
+  if (words.length <= maxWords) return words.join(' ');
+  return `${words.slice(0, maxWords).join(' ')}...`;
+}
+
+function styleAnchorFromTopic(topic: string): { motif: string; palette: string; texture: string } {
+  const packs = [
+    { motif: 'archival evidence board details', palette: 'dark desaturated steel-blue palette with deep blacks', texture: 'fine film grain and realistic low-key texture' },
+    { motif: 'period-accurate objects in foreground', palette: 'high-contrast low-key chiaroscuro palette', texture: 'subtle documentary handheld realism with shadow-heavy depth' },
+    { motif: 'symbolic environmental clues in each frame', palette: 'dark muted earth tones with selective crimson accents', texture: 'cinematic low-light texture with atmospheric haze' },
+    { motif: 'forensic detail inserts between wider shots', palette: 'cold near-monochrome palette with dim warm highlights', texture: 'clean lens realism with oppressive shadows' }
+  ];
+  const hash = topic.split('').reduce((sum, c) => sum + c.charCodeAt(0), 0);
+  return packs[Math.abs(hash) % packs.length];
+}
+
+function enrichScenePromptsForGrok(scriptData: ScriptData, topic: string): ScriptData {
+  const shots = ['tight close-up', 'medium shot', 'wide environmental shot', 'over-the-shoulder perspective', 'slow overhead reveal'];
+  const motions = ['static locked frame', 'slow push-in', 'gentle lateral pan', 'controlled dolly-in', 'subtle handheld drift'];
+  const style = styleAnchorFromTopic(topic);
+  const scenes = scriptData.scenes.map((scene, i) => {
+    const prevVo = i > 0 ? summarizeContextLine(String(scriptData.scenes[i - 1].voiceover || '')) : '';
+    const nextVo = i < scriptData.scenes.length - 1 ? summarizeContextLine(String(scriptData.scenes[i + 1].voiceover || '')) : '';
+    const continuityLine = i === 0
+      ? `Opening scene. Establish core subject in a dark, ominous setting with ${style.palette}.`
+      : `Continuity from prior scene: ${prevVo || 'same subject progression'}; preserve visual thread.`;
+    const forwardLine = nextVo ? `Foreshadow next beat: ${nextVo}` : 'Conclude this beat with a strong transitional visual.';
+    const shotLine = `Camera: ${shots[i % shots.length]}; movement: ${motions[i % motions.length]}.`;
+    const styleLine = `Art direction: ${style.motif}, ${style.palette}, ${style.texture}. Keep lighting low-key, shadow-rich, and dark in nature.`;
+    const base = ensureVerticalPromptSuffix(scene.prompt);
+    const merged = [
+      continuityLine,
+      shotLine,
+      styleLine,
+      base.replace(/\s*9:16 aspect ratio, vertical portrait format\.?$/i, '').trim(),
+      forwardLine,
+      '9:16 aspect ratio, vertical portrait format'
+    ].filter(Boolean).join(' ');
+    return { ...scene, prompt: merged };
+  });
+  return { ...scriptData, scenes };
 }
 
 // 2. Generate Video Clip with Grok (Polling Method)
@@ -512,6 +1070,7 @@ async function main() {
   }
 
   // ─── STEP 2: VOICEOVER ───
+  scriptData = enrichScenePromptsForGrok(scriptData, topic);
   if (RUN_STEP === null || RUN_STEP === 2) stepBanner(2, 'VOICEOVER');
   const audioPath = path.join(TEMP_DIR, 'audio.mp3');
   const scenes = TEST_MODE ? scriptData.scenes.slice(0, 1) : scriptData.scenes;
@@ -676,7 +1235,17 @@ async function main() {
     const promptsTxtPath = path.join(tempDirForClips, 'clip_prompts.txt');
     const promptsList = scenes.map((s, i) => ({ index: i, prompt: s.prompt, filename: `clip_${i}.mp4` }));
     fs.writeFileSync(promptsPath, JSON.stringify(promptsList, null, 2));
-    const txtLines = promptsList.map((p) => `--- Clip ${p.index} → ${p.filename} ---\n${p.prompt}`).join('\n\n');
+    const txtLines = promptsList.map((p) => {
+      const prevCtx = p.index > 0 ? summarizeContextLine(String(scenes[p.index - 1].voiceover || scenes[p.index - 1].prompt || '')) : '';
+      const nextCtx = p.index < scenes.length - 1 ? summarizeContextLine(String(scenes[p.index + 1].voiceover || scenes[p.index + 1].prompt || '')) : '';
+      const lines = [
+        `--- Clip ${p.index} → ${p.filename} ---`,
+        prevCtx ? `Prev context: ${prevCtx}` : 'Prev context: scene opening',
+        `Prompt: ${p.prompt}`,
+        nextCtx ? `Next context: ${nextCtx}` : 'Next context: final scene ending'
+      ];
+      return lines.join('\n');
+    }).join('\n\n');
     fs.writeFileSync(promptsTxtPath, txtLines);
     log('MAIN', `Step 3: manual video — exported ${scenes.length} prompts to temp/clip_prompts.json and temp/clip_prompts.txt`);
     if (!allClipsExist) {
@@ -728,9 +1297,9 @@ async function main() {
       log('MAIN', 'temp/audio.mp3 not found. Run step 2 first (or RUN_STEP=2).');
       process.exit(1);
     }
-    const missingClips = scenes.map((_, i) => `clip_${i}.mp4`).filter((name) => !fs.existsSync(path.join(tempDir, name)));
-    if (missingClips.length > 0) {
-      log('MAIN', `Missing clips: ${missingClips.join(', ')}. Add them to temp/ or run step 3 first.`);
+    const availableClipIndices = getContiguousClipIndices(tempDir);
+    if (availableClipIndices.length === 0) {
+      log('MAIN', 'No clips found (expected clip_0.mp4, clip_1.mp4, ...). Run step 3 first.');
       process.exit(1);
     }
   }
@@ -742,13 +1311,135 @@ async function main() {
 
   // Normalize every clip to its scene duration so visual scene changes line up with narration beats.
   // If per-scene audio files (audio_scene_i.mp3) exist, align each clip to its exact audio duration.
+  const availableClipIndices = getContiguousClipIndices(tempDir);
+  const allClipNames = fs.readdirSync(tempDir).filter((n) => /^clip_\d+\.mp4$/.test(n));
+  const allClipIndices = allClipNames.map((n) => parseInt(n.replace(/^clip_(\d+)\.mp4$/, '$1'), 10));
+  const maxContiguous = availableClipIndices.length === 0 ? -1 : Math.max(...availableClipIndices);
+  if (allClipIndices.some((idx) => idx > maxContiguous)) {
+    log('MAIN', 'Clips must be contiguous (clip_0.mp4, clip_1.mp4, ...). Found gaps.');
+    process.exit(1);
+  }
+  const fullAudioSec = await getAudioDurationSeconds(audioFilePath);
+  const sceneVoiceovers = scenes.map((s) => String((s as { voiceover?: string }).voiceover || '').trim());
+  const hasSceneVoiceovers = sceneVoiceovers.every((v) => !!v);
+  const sceneVoiceoverCoverage = computeCoverageRatio(scriptData.voiceover, sceneVoiceovers);
+  // When clips >= scenes, use first N clips and run scene-lock (no extra clip in final video).
+  const clipIndicesForAssembly =
+    availableClipIndices.length >= scenes.length
+      ? availableClipIndices.slice(0, scenes.length)
+      : availableClipIndices;
+  const hasAllSceneAudioForClipsUsed =
+    clipIndicesForAssembly.length > 0 &&
+    clipIndicesForAssembly.every((i) => fs.existsSync(path.join(tempDir, `audio_scene_${i}.mp3`)));
+  const canUseSceneLockMode =
+    clipIndicesForAssembly.length === scenes.length &&
+    hasSceneVoiceovers &&
+    (hasAllSceneAudioForClipsUsed || sceneVoiceoverCoverage >= 0.9);
+
+  let segments: ClipSegment[];
+  let mode: 'scene-driven' | 'clip-driven';
+  if (canUseSceneLockMode) {
+    mode = 'scene-driven';
+    if (availableClipIndices.length > scenes.length) {
+      log('MAIN', `Using first ${scenes.length} of ${availableClipIndices.length} clips (scene-lock; extra clips ignored).`);
+    }
+    const base: Array<{ clipIndex: number; text: string; durationSec: number; source: 'scene-driven'; sourceClipDurationSec?: number }> = [];
+    for (const clipIndex of clipIndicesForAssembly) {
+      const clipDur = await getVideoDurationSeconds(path.join(tempDir, `clip_${clipIndex}.mp4`));
+      base.push({
+        clipIndex,
+        text: sceneVoiceovers[clipIndex] || String(scenes[clipIndex].prompt || '').trim(),
+        durationSec: Math.max(0.1, scenes[clipIndex].duration || SCENE_DURATION_DEFAULT),
+        source: 'scene-driven' as const,
+        sourceClipDurationSec: clipDur > 0 ? clipDur : undefined
+      });
+    }
+    segments = await regenerateSegmentAudio(tempDir, withTimeline(base));
+    segments = segments.map((seg, idx) => ({ ...seg, sourceClipDurationSec: base[idx].sourceClipDurationSec }));
+
+    // Optional: if any segment is much longer than its clip, shorten voiceover via LLM and re-run TTS once.
+    const stretchThreshold = 1.5;
+    const overflowIndices = segments
+      .map((seg, idx) => {
+        const clipSec = base[idx].sourceClipDurationSec ?? TARGET_CLIP_SECONDS;
+        const ratio = clipSec > 0 ? seg.durationSec / clipSec : 0;
+        return ratio > stretchThreshold ? idx : -1;
+      })
+      .filter((i) => i >= 0);
+    if (AUTO_SHORTEN_VOICEOVER && overflowIndices.length > 0) {
+      const toShorten = overflowIndices.map((idx) => ({
+        sceneIndex: idx,
+        voiceover: base[idx].text,
+        maxSec: Math.min((base[idx].sourceClipDurationSec ?? TARGET_CLIP_SECONDS) * 1.2, TARGET_CLIP_SECONDS)
+      }));
+      log('AUDIO', `Shortening voiceover for ${toShorten.length} scene(s) that exceed clip length (AUTO_SHORTEN_VOICEOVER).`);
+      const shortened = await shortenVoiceoversToFit(toShorten);
+      for (let i = 0; i < overflowIndices.length; i++) {
+        const idx = overflowIndices[i];
+        const newText = shortened[i] ?? base[idx].text;
+        scriptData.scenes[idx] = { ...scriptData.scenes[idx], voiceover: newText } as (typeof scriptData.scenes)[0];
+        base[idx] = { ...base[idx], text: newText };
+      }
+      segments = await regenerateSegmentAudio(tempDir, withTimeline(base));
+      segments = segments.map((seg, idx) => ({ ...seg, sourceClipDurationSec: base[idx].sourceClipDurationSec }));
+    }
+
+    log('FFMPEG', `Preparing clips in scene-lock mode with regenerated scene audio (${segments.length} clip(s))`);
+  } else {
+    mode = 'clip-driven';
+    const clipCount = availableClipIndices.length;
+    const narrativeSegments = splitVoiceoverByClipCount(scriptData.voiceover, clipCount);
+    const weights = narrativeSegments.map((t) => Math.max(1, t.trim().split(/\s+/).filter(Boolean).length));
+    const fallbackDurations = distributeDurationsByWeight(
+      fullAudioSec > 0 ? fullAudioSec : clipCount * SCENE_DURATION_DEFAULT,
+      weights
+    );
+    segments = withTimeline(
+      availableClipIndices.map((clipIndex, idx) => ({
+        clipIndex,
+        text: narrativeSegments[idx] ?? '',
+        durationSec: fallbackDurations[idx] ?? SCENE_DURATION_DEFAULT,
+        source: 'clip-driven' as const
+      }))
+    );
+    // Context-first: regenerate segment audio with neighboring segment context.
+    segments = await regenerateSegmentAudio(tempDir, segments);
+    const clipDurations = await Promise.all(
+      availableClipIndices.map((clipIndex) => getVideoDurationSeconds(path.join(tempDir, `clip_${clipIndex}.mp4`)))
+    );
+    segments = segments.map((seg) => {
+      const idx = availableClipIndices.indexOf(seg.clipIndex);
+      return {
+        ...seg,
+        sourceClipDurationSec: idx >= 0 && clipDurations[idx] > 0 ? clipDurations[idx] : undefined
+      };
+    });
+    log('FFMPEG', `Preparing clips in clip-driven mode (${segments.length} clip(s))`);
+  }
+
+  const mergedAudioSec = await getAudioDurationSeconds(audioFilePath);
+  const alignment = buildAlignmentChecks(
+    mode,
+    scriptData.voiceover,
+    segments,
+    mergedAudioSec,
+    clipIndicesForAssembly.length,
+    scenes.length
+  );
+  writeSegmentMap(OUTPUT_DIR, {
+    mode,
+    clipCount: segments.length,
+    audioDurationSec: Number((mergedAudioSec || fullAudioSec || 0).toFixed(3)),
+    segments
+  });
+  ensureAlignmentOrBlock(alignment, OUTPUT_DIR, scenes.length);
   log('FFMPEG', 'Preparing clips: trim/pad each scene to its target duration for better audio sync');
-  const trimmedPaths = await prepareClipsToSceneDurations(tempDir, scenes);
+  const trimmedPaths = await prepareClipsToTargetDurations(tempDir, segments);
 
   await new Promise<void>((resolve, reject) => {
     const chain = ffmpeg();
 
-    if (scenes.length === 1) {
+    if (segments.length === 1) {
       log('FFMPEG', `Single clip: muxing + audio${useBackgroundMusic ? ' + background music (fade in/out)' : ''} → ${outputPath} (9:16)`);
       chain.input(trimmedPaths[0]);
     } else {
@@ -757,7 +1448,7 @@ async function main() {
         .map((p) => `file '${p.replace(/\\/g, '/')}'`)
         .join('\n');
       fs.writeFileSync(listPath, fileList);
-      log('FFMPEG', `Wrote concat list (${scenes.length} file(s))`);
+      log('FFMPEG', `Wrote concat list (${segments.length} file(s))`);
       chain.input(listPath).inputOptions(['-f concat', '-safe 0']);
     }
 

@@ -579,6 +579,9 @@
           <div class="row" style="margin-top: 0; gap: 1.25rem;">
             <div>
               <video id="video" controls playsinline></video>
+              <div style="margin-top: 0.6rem;">
+                <button id="btnDownloadVideo" type="button" class="secondary" style="display: none;">Download video</button>
+              </div>
             </div>
             <div class="grow">
               <div style="margin-bottom: 0.75rem">
@@ -914,10 +917,12 @@
             }
           }
           var videoEl = document.getElementById('video');
+          var downloadBtn = document.getElementById('btnDownloadVideo');
           var titleEl = document.getElementById('title');
           var descEl = document.getElementById('description');
           var tagsEl = document.getElementById('tags');
           if (videoEl) videoEl.removeAttribute('src');
+          if (downloadBtn) downloadBtn.style.display = 'none';
           if (titleEl) titleEl.value = '';
           if (descEl) descEl.value = '';
           if (tagsEl) tagsEl.value = '';
@@ -926,6 +931,7 @@
             if (videoEl && data.finalVideoUrl) {
               videoEl.src = data.finalVideoUrl.startsWith('http') ? data.finalVideoUrl : getApiBase() + data.finalVideoUrl;
             }
+            if (downloadBtn) downloadBtn.style.display = 'inline-flex';
             authFetch('/api/projects/' + encodeURIComponent(projectId) + '/meta')
               .then(function(r) {
                 if (!r.ok) return null;
@@ -1296,6 +1302,26 @@
             alert(e.message || 'Delete failed');
           } finally {
             if (btn) btn.disabled = false;
+          }
+        });
+
+        document.getElementById('btnDownloadVideo')?.addEventListener('click', async () => {
+          if (!currentProjectId) return;
+          const btn = document.getElementById('btnDownloadVideo');
+          const originalText = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = 'Preparing...';
+          try {
+            const res = await authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/download-token');
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.token) throw new Error(data.error || 'Failed to prepare download');
+            const url = getApiBase() + '/api/projects/' + encodeURIComponent(currentProjectId) + '/download?token=' + encodeURIComponent(data.token);
+            window.location.href = url;
+          } catch (e) {
+            alert((e && e.message) || 'Download failed');
+          } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
           }
         });
 

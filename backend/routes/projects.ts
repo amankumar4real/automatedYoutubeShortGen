@@ -1,6 +1,8 @@
 import { Router, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import jwt from 'jsonwebtoken';
+import { Readable } from 'stream';
 import multer from 'multer';
 import {
   createProject,
@@ -22,6 +24,60 @@ import { config } from '../config';
 import { suggestFreshTitles } from '../titleService';
 
 const router = Router();
+
+type DownloadTokenPayload = {
+  userId: string;
+  projectId: string;
+  purpose: 'project_download';
+};
+
+function signDownloadToken(payload: DownloadTokenPayload): string {
+  return jwt.sign(payload, config.jwt.secret, { expiresIn: '5m' } as jwt.SignOptions);
+}
+
+function verifyDownloadToken(token: string): DownloadTokenPayload | null {
+  try {
+    const decoded = jwt.verify(token, config.jwt.secret) as DownloadTokenPayload;
+    if (!decoded || decoded.purpose !== 'project_download') return null;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+router.get('/:projectId/download', async (req, res: Response) => {
+  const { projectId } = req.params;
+  const token = String(req.query.token || '');
+  if (!token) return res.status(400).json({ error: 'token is required' });
+  const payload = verifyDownloadToken(token);
+  if (!payload || payload.projectId !== projectId) return res.status(401).json({ error: 'Invalid or expired download token' });
+
+  const project = await getProjectByProjectId(projectId, payload.userId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const fileName = `short_${projectId}.mp4`;
+  const outputDir = getProjectOutputDir(projectId);
+  const localFinalPath = path.join(outputDir, 'final_short.mp4');
+
+  res.setHeader('Content-Type', 'video/mp4');
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+
+  if (fs.existsSync(localFinalPath)) {
+    return res.sendFile(localFinalPath);
+  }
+
+  if (project.finalVideoKey) {
+    const url = await getAssetUrl(project.finalVideoKey);
+    if (!url) return res.status(404).json({ error: 'Final video not found' });
+    const upstream = await fetch(url);
+    if (!upstream.ok || !upstream.body) {
+      return res.status(404).json({ error: 'Final video not found' });
+    }
+    Readable.fromWeb(upstream.body as any).pipe(res);
+    return;
+  }
+  return res.status(404).json({ error: 'Final video not found' });
+});
+
 router.use(authMiddleware);
 
 const upload = multer({ dest: path.join(config.workspaceRoot, 'temp', 'uploads') });
@@ -129,6 +185,16 @@ router.get('/:projectId/script', async (req: AuthRequest, res: Response) => {
   return res.json({ voiceover: script.voiceover, scenes: script.scenes });
 });
 
+router.get('/:projectId/download-token', async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  const { projectId } = req.params;
+  const project = await getProjectByProjectId(projectId, userId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (project.status !== 'assembly_done') return res.status(400).json({ error: 'Final video is not ready yet' });
+  const token = signDownloadToken({ userId, projectId, purpose: 'project_download' });
+  return res.json({ token, expiresInSeconds: 300 });
+});
+
 router.post('/:projectId/confirm-script', async (req: AuthRequest, res: Response) => {
   const userId = req.user!.id;
   const { projectId } = req.params;
@@ -196,11 +262,13 @@ router.get('/:projectId', async (req: AuthRequest, res: Response) => {
   const project = await getProjectByProjectId(projectId, userId);
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
-  const [scriptUrl, finalVideoUrlR2, youtubeMetaUrlR2, audioUrlR2] = await Promise.all([
+  const [scriptUrl, finalVideoUrlR2, youtubeMetaUrlR2, audioUrlR2, segmentMapUrlR2, segmentAlignmentUrlR2] = await Promise.all([
     getAssetUrl(project.scriptKey),
     getAssetUrl(project.finalVideoKey),
     getAssetUrl(project.youtubeMetaKey),
-    project.audioKeys?.[0] ? getAssetUrl(project.audioKeys[0]) : Promise.resolve(null)
+    project.audioKeys?.[0] ? getAssetUrl(project.audioKeys[0]) : Promise.resolve(null),
+    getAssetUrl(project.segmentMapKey),
+    getAssetUrl(project.segmentAlignmentKey)
   ]);
   const outputDir = getProjectOutputDir(projectId);
   const finalVideoUrl =
@@ -213,6 +281,19 @@ router.get('/:projectId', async (req: AuthRequest, res: Response) => {
     (fs.existsSync(path.join(outputDir, 'youtube_meta.json'))
       ? `/api/projects/${projectId}/media/youtube_meta.json`
       : null);
+  const segmentMapUrl =
+    segmentMapUrlR2 ??
+    (fs.existsSync(path.join(outputDir, 'clip_segment_map.json'))
+      ? `/api/projects/${projectId}/media/clip_segment_map.json`
+      : null);
+  const segmentAlignmentUrl =
+    segmentAlignmentUrlR2 ??
+    (fs.existsSync(path.join(outputDir, 'segment_alignment.json'))
+      ? `/api/projects/${projectId}/media/segment_alignment.json`
+      : null);
+  const audioSegmentUrls = await Promise.all(
+    (project.audioKeys ?? []).slice(1).map((k) => getAssetUrl(k))
+  );
 
   res.json({
     projectId: project.projectId,
@@ -223,11 +304,81 @@ router.get('/:projectId', async (req: AuthRequest, res: Response) => {
     scriptUrl,
     finalVideoUrl: finalVideoUrl ?? null,
     youtubeMetaUrl: youtubeMetaUrl ?? null,
+    segmentMapUrl: segmentMapUrl ?? null,
+    segmentAlignmentUrl: segmentAlignmentUrl ?? null,
     audioUrl: audioUrlR2,
+    audioSegmentUrls: audioSegmentUrls.filter((u): u is string => !!u),
     requiredFiles: project.requiredFiles,
     errorMessage: project.errorMessage,
     updatedAt: project.updatedAt.toISOString(),
     createdAt: project.createdAt.toISOString()
+  });
+});
+
+async function loadProjectJsonAsset(
+  projectId: string,
+  r2Key: string | undefined,
+  localFile: string
+): Promise<Record<string, unknown> | null> {
+  if (r2Key) {
+    try {
+      const url = await getAssetUrl(r2Key);
+      if (url) {
+        const resp = await fetch(url);
+        if (resp.ok) return (await resp.json()) as Record<string, unknown>;
+      }
+    } catch {
+      /* fall back to local file */
+    }
+  }
+  const localPath = path.join(getProjectOutputDir(projectId), localFile);
+  if (!fs.existsSync(localPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(localPath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+router.get('/:projectId/segments', async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  const { projectId } = req.params;
+  const project = await getProjectByProjectId(projectId, userId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+
+  const payload = await loadProjectJsonAsset(projectId, project.segmentMapKey, 'clip_segment_map.json');
+  if (!payload) return res.status(404).json({ error: 'Segment map not found' });
+  return res.json(payload);
+});
+
+router.get('/:projectId/segments/detailed', async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  const { projectId } = req.params;
+  const project = await getProjectByProjectId(projectId, userId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+
+  const [segmentMap, alignment] = await Promise.all([
+    loadProjectJsonAsset(projectId, project.segmentMapKey, 'clip_segment_map.json'),
+    loadProjectJsonAsset(projectId, project.segmentAlignmentKey, 'segment_alignment.json')
+  ]);
+  if (!segmentMap) return res.status(404).json({ error: 'Segment map not found' });
+
+  const segmentRows = Array.isArray((segmentMap as { segments?: unknown[] }).segments)
+    ? ((segmentMap as { segments?: unknown[] }).segments as Array<Record<string, unknown>>)
+    : [];
+  const rowsWithUrls = await Promise.all(segmentRows.map(async (row, idx) => {
+    const clipIndex = typeof row.clipIndex === 'number' ? row.clipIndex : idx;
+    const clipUrl = project.clipKeys?.[clipIndex] ? await getAssetUrl(project.clipKeys[clipIndex]) : null;
+    const audioSegmentUrl = project.audioKeys?.[clipIndex + 1] ? await getAssetUrl(project.audioKeys[clipIndex + 1]) : null;
+    return { ...row, clipUrl, audioSegmentUrl };
+  }));
+
+  return res.json({
+    mode: segmentMap.mode ?? null,
+    clipCount: segmentMap.clipCount ?? rowsWithUrls.length,
+    audioDurationSec: segmentMap.audioDurationSec ?? null,
+    segments: rowsWithUrls,
+    alignment
   });
 });
 

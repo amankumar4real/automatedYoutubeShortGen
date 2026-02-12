@@ -41,7 +41,9 @@ export async function runProjectPipeline(
   await syncR2ToWorkspace(projectId, userId, {
     scriptKey: project.scriptKey,
     audioKeys: project.audioKeys,
-    clipKeys: project.clipKeys
+    clipKeys: project.clipKeys,
+    segmentMapKey: project.segmentMapKey,
+    segmentAlignmentKey: project.segmentAlignmentKey
   });
 
   const runOpts = {
@@ -110,7 +112,9 @@ export async function runProjectAfterScriptApproval(
   await syncR2ToWorkspace(projectId, userId, {
     scriptKey: project.scriptKey,
     audioKeys: project.audioKeys,
-    clipKeys: project.clipKeys
+    clipKeys: project.clipKeys,
+    segmentMapKey: project.segmentMapKey,
+    segmentAlignmentKey: project.segmentAlignmentKey
   });
 
   const runOpts = {
@@ -202,7 +206,9 @@ export async function runProjectAssembly(userId: string, projectId: string): Pro
   await syncR2ToWorkspace(projectId, userId, {
     scriptKey: project.scriptKey,
     audioKeys: project.audioKeys,
-    clipKeys: project.clipKeys
+    clipKeys: project.clipKeys,
+    segmentMapKey: project.segmentMapKey,
+    segmentAlignmentKey: project.segmentAlignmentKey
   });
 
   try {
@@ -216,18 +222,30 @@ export async function runProjectAssembly(userId: string, projectId: string): Pro
 
     const finalPath = path.join(outputDir, 'final_short.mp4');
     const metaPath = path.join(outputDir, 'youtube_meta.json');
+    const segmentMapPath = path.join(outputDir, 'clip_segment_map.json');
+    const segmentAlignmentPath = path.join(outputDir, 'segment_alignment.json');
     const finalKey = fs.existsSync(finalPath)
       ? await uploadProjectFile(userId, projectId, 'final_short.mp4', finalPath)
       : null;
     const metaKey = fs.existsSync(metaPath)
       ? await uploadProjectFile(userId, projectId, 'youtube_meta.json', metaPath)
       : null;
+    const segmentMapKey = fs.existsSync(segmentMapPath)
+      ? await uploadProjectFile(userId, projectId, 'clip_segment_map.json', segmentMapPath)
+      : null;
+    const segmentAlignmentKey = fs.existsSync(segmentAlignmentPath)
+      ? await uploadProjectFile(userId, projectId, 'segment_alignment.json', segmentAlignmentPath)
+      : null;
+    const workspaceUploads = await uploadWorkspaceToR2(userId, projectId, workspace);
 
     await updateProject(projectId, userId, {
       status: 'assembly_done',
       currentStage: 'assembly',
       finalVideoKey: finalKey ?? undefined,
       youtubeMetaKey: metaKey ?? undefined,
+      segmentMapKey: segmentMapKey ?? undefined,
+      segmentAlignmentKey: segmentAlignmentKey ?? undefined,
+      audioKeys: workspaceUploads.audioKeys ?? project.audioKeys,
       requiredFiles: undefined,
       errorMessage: undefined
     });
@@ -257,6 +275,28 @@ export async function runProjectAssembly(userId: string, projectId: string): Pro
       }
     }
   } catch (err) {
+    const message = (err as Error).message || '';
+    if (message.startsWith('ALIGNMENT_BLOCKED:')) {
+      let payload: { reasons?: string[]; requiredFiles?: string[] } = {};
+      try {
+        payload = JSON.parse(message.slice('ALIGNMENT_BLOCKED:'.length)) as { reasons?: string[]; requiredFiles?: string[] };
+      } catch {
+        payload = {};
+      }
+      await updateProject(projectId, userId, {
+        status: 'waiting_for_clips',
+        currentStage: 'clips',
+        requiredFiles: payload.requiredFiles ?? project.requiredFiles,
+        errorMessage: payload.reasons?.join(', ') ?? 'alignment_blocked'
+      });
+      await pushStageHistory(projectId, userId, {
+        stage: 'assembly',
+        status: 'waiting_for_clips',
+        at: new Date().toISOString(),
+        detail: payload.reasons?.join(', ') ?? 'alignment_blocked'
+      });
+      return;
+    }
     await updateProject(projectId, userId, {
       status: 'error',
       currentStage: 'assembly',
