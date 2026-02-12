@@ -52,8 +52,8 @@ services:
     env_file: .env
     environment:
       - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
-    # Quick tunnel: exposes web:80 at https://<random>.trycloudflare.com (see deploy/NAMED-TUNNEL.md for stable URL).
-    command: ["tunnel", "--url", "http://web:80"]
+    # Named tunnel: stable hostname via Cloudflare dashboard mapping.
+    command: tunnel run --token ${TUNNEL_TOKEN}
     depends_on:
       - web
 
