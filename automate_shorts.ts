@@ -135,12 +135,14 @@ async function prepareClipsToSceneDurations(
     const outPath = path.join(tempDir, `trimmed_${i}.mp4`);
     const dur = await getVideoDurationSeconds(clipPath);
     const padSec = Math.max(0, targetSec - Math.min(dur, targetSec));
-    const vf =
-      padSec > 0
-        ? `trim=duration=${targetSec},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${padSec.toFixed(3)}`
-        : `trim=duration=${targetSec},setpts=PTS-STARTPTS`;
+    const vf = `trim=duration=${targetSec},setpts=PTS-STARTPTS`;
     await new Promise<void>((resolve, reject) => {
-      ffmpeg(clipPath)
+      const chain = ffmpeg();
+      chain.input(clipPath);
+      if (padSec > 0) {
+        chain.inputOptions(['-stream_loop -1']);
+      }
+      chain
         .noAudio()
         .videoFilters(vf)
         .outputOptions(['-c:v libx264', '-pix_fmt yuv420p'])
@@ -513,19 +515,30 @@ async function main() {
   if (RUN_STEP === null || RUN_STEP === 2) stepBanner(2, 'VOICEOVER');
   const audioPath = path.join(TEMP_DIR, 'audio.mp3');
   const scenes = TEST_MODE ? scriptData.scenes.slice(0, 1) : scriptData.scenes;
-  const hasPerSceneVoiceover = scenes.every(
+  const hasPerSceneVoiceoverRaw = scenes.every(
     (s) => typeof (s as { voiceover?: string }).voiceover === 'string' && !!(s as { voiceover?: string }).voiceover?.trim()
   );
+  const normalized = (t: string) => t.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+  const fullVoiceNormalized = normalized(String(scriptData.voiceover || ''));
+  const combinedSceneVoiceover = scenes.map((s) => String((s as { voiceover?: string }).voiceover || '')).join(' ').trim();
+  const combinedSceneNormalized = normalized(combinedSceneVoiceover);
+  const coverageRatio = fullVoiceNormalized.length
+    ? combinedSceneNormalized.length / fullVoiceNormalized.length
+    : 1;
+  // Guardrail: only use per-scene audio when it appears to fully cover the full narration.
+  const usePerSceneVoiceover =
+    hasPerSceneVoiceoverRaw &&
+    (fullVoiceNormalized.length === 0 || coverageRatio >= 0.9);
 
   if (RUN_STEP === null || RUN_STEP === 2) {
     if (REUSE_TEMP) {
       const allSceneAudioExist =
-        hasPerSceneVoiceover &&
+        usePerSceneVoiceover &&
         scenes.every((_, i) => fs.existsSync(path.join(TEMP_DIR, `audio_scene_${i}.mp3`)));
       if (allSceneAudioExist && fs.existsSync(audioPath)) {
         log('MAIN', 'Using existing per-scene temp/audio_scene_*.mp3 and combined temp/audio.mp3');
         log('MAIN', 'Step 2 done: audio ready');
-      } else if (!hasPerSceneVoiceover && fs.existsSync(audioPath)) {
+      } else if (!usePerSceneVoiceover && fs.existsSync(audioPath)) {
         log('MAIN', 'Using existing temp/audio.mp3');
         log('MAIN', 'Step 2 done: audio ready');
       }
@@ -534,7 +547,7 @@ async function main() {
     if (!REUSE_TEMP || !fs.existsSync(audioPath)) {
       validateApiKeysForStep('audio');
 
-      if (hasPerSceneVoiceover) {
+      if (usePerSceneVoiceover) {
         log('MAIN', 'Generating per-scene voiceover (ElevenLabs)');
         // Generate one audio file per scene: temp/audio_scene_{i}.mp3
         for (let i = 0; i < scenes.length; i++) {

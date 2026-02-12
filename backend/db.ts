@@ -33,6 +33,7 @@ export interface UserDoc {
 export type ProjectStatus =
   | 'draft'
   | 'script_generated'
+  | 'rejected'
   | 'audio_generated'
   | 'waiting_for_clips'
   | 'assembly_done'

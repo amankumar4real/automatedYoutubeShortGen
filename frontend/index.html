@@ -48,6 +48,40 @@
       @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
       .card-prompts { animation: cardFadeIn 0.25s ease; }
       @keyframes cardFadeIn { from { opacity: 0; } to { opacity: 1; } }
+      .logo-lockup {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.7rem;
+        margin-bottom: 0.9rem;
+      }
+      .logo-badge {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(140deg, #7c3aed 0%, #6366f1 55%, #2563eb 100%);
+        box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+      }
+      .logo-wordmark {
+        display: inline-flex;
+        flex-direction: column;
+        line-height: 1.05;
+      }
+      .logo-title {
+        font-size: 1rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--text);
+      }
+      .logo-subtitle {
+        font-size: 0.68rem;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-top: 0.15rem;
+      }
 
       h1 {
         font-size: 1.75rem;
@@ -175,6 +209,7 @@
       .pill-running, .pill-script_generated, .pill-audio_generated { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
       .pill-done, .pill-assembly_done { background: rgba(16, 185, 129, 0.2); color: #34d399; }
       .pill-error { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+      .pill-rejected { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
       .pill-waiting_for_clips { background: rgba(234, 179, 8, 0.2); color: #facc15; }
       video {
         width: 100%;
@@ -302,6 +337,35 @@
       .status-row { display: flex; align-items: center; margin-bottom: 0.5rem; gap: 0.75rem; }
       .status-project-id { font-size: 0.8125rem; }
       .prompts-card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+      .script-decision-box { margin-top: 1rem; }
+      .script-decision-msg { margin-top: 0.5rem; }
+      .title-options-wrap { position: relative; }
+      .title-options-overlay {
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        margin-top: 0.5rem;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        box-shadow: var(--shadow), 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        z-index: 12;
+        overflow: hidden;
+      }
+      .title-options-overlay.is-visible { display: block; }
+      .title-option-btn {
+        width: 100%;
+        text-align: left;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        padding: 0.55rem 0.75rem;
+        cursor: pointer;
+      }
+      .title-option-btn:hover { background: #243049; border-color: #334155; }
       .project-list { list-style: none; padding: 0; margin: 0; }
       .project-list li {
         padding: 1rem 1.15rem;
@@ -366,6 +430,17 @@
   <body>
     <div class="container">
       <div id="pageLogin" class="page">
+        <div class="logo-lockup" aria-label="Shorts Generator logo">
+          <div class="logo-badge" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M8 6.5C8 5.67 8.94 5.19 9.62 5.68L17.03 10.95C17.61 11.36 17.61 12.22 17.03 12.63L9.62 17.9C8.94 18.39 8 17.91 8 17.08V6.5Z" fill="white"/>
+            </svg>
+          </div>
+          <div class="logo-wordmark">
+            <span class="logo-title">Shorts Generator</span>
+            <span class="logo-subtitle">AI Video Studio</span>
+          </div>
+        </div>
         <h1>Shorts Generator</h1>
         <p class="subtitle">Sign in or create an account to manage your shorts.</p>
         <div class="card login-wrap">
@@ -392,7 +467,20 @@
 
       <div id="pageProjects" class="page">
         <div class="projects-header">
-          <h1>My Shorts</h1>
+          <div>
+            <div class="logo-lockup" aria-label="Shorts Generator logo" style="margin-bottom: 0.6rem;">
+              <div class="logo-badge" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M8 6.5C8 5.67 8.94 5.19 9.62 5.68L17.03 10.95C17.61 11.36 17.61 12.22 17.03 12.63L9.62 17.9C8.94 18.39 8 17.91 8 17.08V6.5Z" fill="white"/>
+                </svg>
+              </div>
+              <div class="logo-wordmark">
+                <span class="logo-title">Shorts Generator</span>
+                <span class="logo-subtitle">AI Video Studio</span>
+              </div>
+            </div>
+            <h1>My Shorts</h1>
+          </div>
           <div class="header-right">
             <span class="logged-in-text">Logged in <span class="dropdown-caret" aria-hidden="true">▾</span></span>
             <button type="button" id="btnLogout" class="secondary">Log out</button>
@@ -447,6 +535,7 @@
               Add these files, then <strong>Upload clips</strong> and <strong>Continue assembly</strong>.
               Name files <code>clip_0.mp4</code>, <code>clip_1.mp4</code>, etc.
             </div>
+            <div class="small">You can select and upload multiple files in one action.</div>
             <ul id="requiredFilesList" class="small" style="margin: 0.5rem 0; padding-left: 1.25rem"></ul>
             <div class="row" style="align-items: center; margin-top: 0.75rem; gap: 0.5rem;">
               <input id="clipFiles" type="file" multiple accept="video/mp4" />
@@ -476,6 +565,14 @@
           <div id="promptsContent" style="display: none;">
             <div id="promptsScenes"></div>
           </div>
+          <div id="scriptDecisionBox" class="waiting-box script-decision-box" style="display: none;">
+            <div class="small">Review the generated script. Confirm to continue pipeline, or reject permanently.</div>
+            <div class="btn-group" style="margin-top: 0.5rem;">
+              <button id="confirmScriptBtn" type="button" class="primary">Confirm script</button>
+              <button id="rejectScriptBtn" type="button" class="danger">Reject permanently</button>
+            </div>
+            <div id="scriptDecisionMsg" class="small script-decision-msg"></div>
+          </div>
         </div>
         <div class="card" id="resultCard" style="display: none">
           <div class="card-header">Result</div>
@@ -486,9 +583,16 @@
             <div class="grow">
               <div style="margin-bottom: 0.75rem">
                 <label for="title">Title</label>
-                <div class="row" style="align-items: center; margin-bottom: 0.25rem; gap: 0.5rem;">
-                  <input id="title" type="text" class="grow" />
-                  <button class="copy-btn" data-copy-target="title">Copy</button>
+                <div class="title-options-wrap">
+                  <div class="row" style="align-items: center; margin-bottom: 0.25rem; gap: 0.5rem;">
+                    <input id="title" type="text" class="grow" />
+                    <button class="copy-btn" data-copy-target="title">Copy</button>
+                    <button id="btnSuggestTitles" type="button" class="secondary">Suggest titles</button>
+                  </div>
+                  <div id="titleOptionsOverlay" class="title-options-overlay">
+                    <div class="suggestions-overlay-title">Title options</div>
+                    <div id="titleOptionsList" class="suggestions-overlay-list"></div>
+                  </div>
                 </div>
               </div>
               <div style="margin-bottom: 0.75rem">
@@ -573,7 +677,7 @@
         el.textContent = (status || '').toString().replace(/_/g, ' ');
         el.className = 'pill ' + ({
           draft: 'pill-draft', script_generated: 'pill-script_generated', audio_generated: 'pill-audio_generated',
-          waiting_for_clips: 'pill-waiting_for_clips', assembly_done: 'pill-assembly_done', error: 'pill-error'
+          waiting_for_clips: 'pill-waiting_for_clips', assembly_done: 'pill-assembly_done', rejected: 'pill-rejected', error: 'pill-error'
         }[status] || 'pill-draft');
       }
 
@@ -601,7 +705,15 @@
         if (empty) empty.style.display = 'none';
         projects.forEach((p) => {
           const li = document.createElement('li');
-          const pillClass = p.status === 'assembly_done' ? 'pill-assembly_done' : p.status === 'waiting_for_clips' ? 'pill-waiting_for_clips' : p.status === 'error' ? 'pill-error' : 'pill-draft';
+          const pillClass = p.status === 'assembly_done'
+            ? 'pill-assembly_done'
+            : p.status === 'waiting_for_clips'
+              ? 'pill-waiting_for_clips'
+              : p.status === 'rejected'
+                ? 'pill-rejected'
+                : p.status === 'error'
+                  ? 'pill-error'
+                  : 'pill-draft';
           const topic = (p.topic || 'Untitled').replace(/</g, '&lt;');
           const shortId = (p.projectId || '').length > 12 ? (p.projectId || '').slice(0, 10) + '…' : (p.projectId || '');
           const details = 'Project: ' + topic + (shortId ? '. ' + shortId : '');
@@ -664,6 +776,7 @@
       let detailPollTimer = null;
       let currentAudioUrl = null;
       let currentAudioKey = null;
+      let currentRequiredFiles = [];
 
       async function loadProjectScript(projectId) {
         const loadingEl = document.getElementById('promptsLoading');
@@ -729,6 +842,10 @@
         const requiredList = document.getElementById('requiredFilesList');
         const audioCard = document.getElementById('audioCard');
         const audioEl = document.getElementById('audioPlayer');
+        const scriptDecisionBox = document.getElementById('scriptDecisionBox');
+        const scriptDecisionMsg = document.getElementById('scriptDecisionMsg');
+        const confirmScriptBtn = document.getElementById('confirmScriptBtn');
+        const rejectScriptBtn = document.getElementById('rejectScriptBtn');
         if (topicEl) topicEl.textContent = 'Loading…';
         if (statusCard) statusCard.style.display = 'block';
         if (resultCard) resultCard.style.display = 'none';
@@ -738,7 +855,8 @@
           if (topicEl) topicEl.textContent = data.topic || 'Project';
           if (projectIdEl) projectIdEl.textContent = 'Project ID: ' + (data.projectId || projectId);
           setStatusPill(statusPill, data.status);
-          const showPrompts = ['script_generated', 'audio_generated', 'waiting_for_clips', 'assembly_done', 'error'].indexOf(data.status) !== -1;
+          const showPrompts = ['script_generated', 'audio_generated', 'waiting_for_clips', 'assembly_done', 'rejected', 'error'].indexOf(data.status) !== -1;
+          const awaitingScriptDecision = data.status === 'script_generated' && data.currentStage === 'script';
           const promptsCardEl = document.getElementById('promptsCard');
           const btnDelete = document.getElementById('btnDeleteProject');
           if (btnDelete) btnDelete.style.display = 'inline-flex';
@@ -747,7 +865,11 @@
             detailScriptLoaded = true;
             loadProjectScript(projectId);
           }
-          if (data.status === 'assembly_done' || data.status === 'error') {
+          if (scriptDecisionBox) scriptDecisionBox.style.display = awaitingScriptDecision ? 'block' : 'none';
+          if (scriptDecisionMsg) scriptDecisionMsg.textContent = awaitingScriptDecision ? 'Pipeline is paused. Choose confirm or reject.' : '';
+          if (confirmScriptBtn) confirmScriptBtn.disabled = false;
+          if (rejectScriptBtn) rejectScriptBtn.disabled = false;
+          if (data.status === 'assembly_done' || data.status === 'rejected' || data.status === 'error' || awaitingScriptDecision) {
             if (detailPollTimer) {
               clearInterval(detailPollTimer);
               detailPollTimer = null;
@@ -761,8 +883,10 @@
           if (data.status === 'waiting_for_clips') {
             if (waitingBox) waitingBox.style.display = 'block';
             if (requiredList) requiredList.innerHTML = (data.requiredFiles || []).map((f) => '<li>' + f + '</li>').join('');
+            currentRequiredFiles = Array.isArray(data.requiredFiles) ? data.requiredFiles.slice() : [];
           } else {
             if (waitingBox) waitingBox.style.display = 'none';
+            currentRequiredFiles = [];
           }
           if (audioEl && audioCard) {
             const rawUrl = data.audioUrl || null;
@@ -820,6 +944,10 @@
               .catch(function() {});
           } else {
             if (resultCard) resultCard.style.display = 'none';
+            var titleOverlayEl = document.getElementById('titleOptionsOverlay');
+            var titleListEl = document.getElementById('titleOptionsList');
+            if (titleOverlayEl) titleOverlayEl.classList.remove('is-visible');
+            if (titleListEl) titleListEl.innerHTML = '';
           }
         }
 
@@ -846,6 +974,22 @@
         document.getElementById('apiBase').value = getApiBase();
         document.getElementById('apiBase').addEventListener('change', function() { setApiBase(this.value); });
         document.getElementById('apiBaseAuth').addEventListener('change', function() { setApiBase(this.value); });
+        const titleSuggestBtn = document.getElementById('btnSuggestTitles');
+        const titleOptionsOverlay = document.getElementById('titleOptionsOverlay');
+        const titleOptionsList = document.getElementById('titleOptionsList');
+
+        function hideTitleOptions() {
+          if (titleOptionsOverlay) titleOptionsOverlay.classList.remove('is-visible');
+          if (titleOptionsList) titleOptionsList.innerHTML = '';
+        }
+        function showTitleOptions(titles) {
+          if (!titleOptionsOverlay || !titleOptionsList) return;
+          titleOptionsList.innerHTML = (titles || []).map(function(t, i) {
+            var safe = String(t || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            return '<button type="button" class="title-option-btn" data-title-idx="' + i + '" data-title-text="' + safe + '">' + safe + '</button>';
+          }).join('');
+          titleOptionsOverlay.classList.add('is-visible');
+        }
 
         document.getElementById('btnLogin').onclick = async () => {
           const base = document.getElementById('apiBaseAuth').value.trim();
@@ -989,11 +1133,105 @@
           }
         };
 
+        if (titleSuggestBtn && titleOptionsOverlay && titleOptionsList) {
+          titleSuggestBtn.onclick = async () => {
+            if (!currentProjectId) return;
+            titleSuggestBtn.disabled = true;
+            const originalText = titleSuggestBtn.textContent;
+            titleSuggestBtn.textContent = 'Fetching…';
+            hideTitleOptions();
+            try {
+              const res = await authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/titles/suggest', {
+                method: 'POST'
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok || !Array.isArray(data.titles)) throw new Error(data.error || 'Failed to fetch title options');
+              showTitleOptions(data.titles.slice(0, 15));
+            } catch (e) {
+              alert((e && e.message) || 'Failed to fetch title options');
+            } finally {
+              titleSuggestBtn.disabled = false;
+              titleSuggestBtn.textContent = originalText;
+            }
+          };
+
+          titleOptionsList.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-title-text]');
+            if (!btn) return;
+            const titleInput = document.getElementById('title');
+            const text = btn.getAttribute('data-title-text') || '';
+            if (titleInput) titleInput.value = text;
+            copyToClipboard(text).catch(() => {});
+            hideTitleOptions();
+          });
+
+          document.addEventListener('click', (e) => {
+            if (!titleOptionsOverlay.classList.contains('is-visible')) return;
+            if (titleOptionsOverlay.contains(e.target) || titleSuggestBtn.contains(e.target)) return;
+            hideTitleOptions();
+          });
+        }
+
+        document.getElementById('confirmScriptBtn')?.addEventListener('click', async () => {
+          if (!currentProjectId) return;
+          const btn = document.getElementById('confirmScriptBtn');
+          const rejectBtn = document.getElementById('rejectScriptBtn');
+          const msgEl = document.getElementById('scriptDecisionMsg');
+          if (btn) btn.disabled = true;
+          if (rejectBtn) rejectBtn.disabled = true;
+          if (msgEl) msgEl.textContent = 'Confirming script and resuming pipeline...';
+          try {
+            const res = await authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/confirm-script', { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Confirm failed');
+            loadProjectDetail(currentProjectId);
+          } catch (e) {
+            if (msgEl) msgEl.textContent = (e && e.message) || 'Confirm failed';
+            if (btn) btn.disabled = false;
+            if (rejectBtn) rejectBtn.disabled = false;
+          }
+        });
+
+        document.getElementById('rejectScriptBtn')?.addEventListener('click', async () => {
+          if (!currentProjectId) return;
+          if (!confirm('Reject this script permanently? This action cannot be undone.')) return;
+          const btn = document.getElementById('rejectScriptBtn');
+          const confirmBtn = document.getElementById('confirmScriptBtn');
+          const msgEl = document.getElementById('scriptDecisionMsg');
+          if (btn) btn.disabled = true;
+          if (confirmBtn) confirmBtn.disabled = true;
+          if (msgEl) msgEl.textContent = 'Rejecting script...';
+          try {
+            const res = await authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/reject-script', { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Reject failed');
+            loadProjectDetail(currentProjectId);
+          } catch (e) {
+            if (msgEl) msgEl.textContent = (e && e.message) || 'Reject failed';
+            if (btn) btn.disabled = false;
+            if (confirmBtn) confirmBtn.disabled = false;
+          }
+        });
+
         document.getElementById('uploadClipsBtn').onclick = async () => {
           if (!currentProjectId) return;
           const input = document.getElementById('clipFiles');
           const files = input && input.files ? input.files : null;
           if (!files || !files.length) { alert('Select one or more clip_*.mp4 files first.'); return; }
+          const pickedNames = Array.from(files).map((f) => f.name);
+          const badNames = pickedNames.filter((n) => !/^clip_(\d+)\.mp4$/i.test(n));
+          if (badNames.length) {
+            alert('Invalid file names. Use exact clip_N.mp4 names.\n\nInvalid:\n- ' + badNames.join('\n- '));
+            return;
+          }
+          if (currentRequiredFiles.length) {
+            const nameSet = new Set(pickedNames);
+            const missing = currentRequiredFiles.filter((n) => !nameSet.has(n));
+            if (missing.length) {
+              const proceed = confirm('Some required clips are not in this selection:\n- ' + missing.join('\n- ') + '\n\nUpload selected files anyway?');
+              if (!proceed) return;
+            }
+          }
           const btn = document.getElementById('uploadClipsBtn');
           btn.disabled = true;
           btn.textContent = 'Uploading…';

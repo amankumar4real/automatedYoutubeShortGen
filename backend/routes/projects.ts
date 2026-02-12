@@ -10,20 +10,60 @@ import {
   getProjectWorkspaceDir,
   getProjectOutputDir,
   updateProject,
+  pushStageHistory,
   uploadProjectFile,
   deleteProject
 } from '../projects';
 import { getObjectJson } from '../r2';
-import { runProjectPipeline, runProjectAssembly } from '../projectRunner';
+import { runProjectPipeline, runProjectAfterScriptApproval, runProjectAssembly } from '../projectRunner';
 import { authMiddleware, AuthRequest } from '../middleware';
 import { logger } from '../logger';
 import { config } from '../config';
+import { suggestFreshTitles } from '../titleService';
 
 const router = Router();
 router.use(authMiddleware);
 
-const OUTPUT_DIR = path.resolve(config.workspaceRoot, 'output');
 const upload = multer({ dest: path.join(config.workspaceRoot, 'temp', 'uploads') });
+
+interface ScriptData {
+  voiceover: string;
+  scenes: Array<{ prompt: string; voiceover?: string; duration?: number }>;
+}
+
+async function loadProjectScriptData(projectId: string, project: { scriptKey?: string }): Promise<ScriptData | null> {
+  const scriptPath = path.join(getProjectWorkspaceDir(projectId), 'script.json');
+  const scriptPathExists = fs.existsSync(scriptPath);
+  let script: ScriptData | null = null;
+
+  if (project.scriptKey) {
+    script = await getObjectJson<ScriptData>(project.scriptKey);
+    if (!script) {
+      try {
+        const url = await getAssetUrl(project.scriptKey);
+        if (url) {
+          const resp = await fetch(url);
+          if (resp.ok) script = (await resp.json()) as ScriptData;
+        }
+      } catch {
+        /* fall back to local file */
+      }
+    }
+  }
+
+  if (!script && scriptPathExists) {
+    try {
+      script = JSON.parse(fs.readFileSync(scriptPath, 'utf-8')) as ScriptData;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (!script || typeof script.voiceover !== 'string' || !Array.isArray(script.scenes)) {
+    return null;
+  }
+  return script;
+}
 
 router.post('/', async (req: AuthRequest, res: Response) => {
   const userId = req.user!.id;
@@ -82,44 +122,72 @@ router.get('/:projectId/script', async (req: AuthRequest, res: Response) => {
   const { projectId } = req.params;
   const project = await getProjectByProjectId(projectId, userId);
   if (!project) return res.status(404).json({ error: 'Project not found' });
-  const scriptPath = path.join(getProjectWorkspaceDir(projectId), 'script.json');
-  const scriptPathExists = fs.existsSync(scriptPath);
-
-  interface ScriptData {
-    voiceover: string;
-    scenes: Array<{ prompt: string; voiceover?: string; duration?: number }>;
-  }
-  let script: ScriptData | null = null;
-
-  if (project.scriptKey) {
-    script = await getObjectJson<ScriptData>(project.scriptKey);
-    if (!script) {
-      try {
-        const url = await getAssetUrl(project.scriptKey);
-        if (url) {
-          const resp = await fetch(url);
-          if (resp.ok) script = (await resp.json()) as ScriptData;
-        }
-      } catch {
-        /* fall back to local file */
-      }
-    }
-  }
-
+  const script = await loadProjectScriptData(projectId, project);
   if (!script) {
-    if (scriptPathExists) {
-      try {
-        script = JSON.parse(fs.readFileSync(scriptPath, 'utf-8')) as ScriptData;
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
-  if (!script || typeof script.voiceover !== 'string' || !Array.isArray(script.scenes)) {
     return res.status(404).json({ error: 'Script not found' });
   }
   return res.json({ voiceover: script.voiceover, scenes: script.scenes });
+});
+
+router.post('/:projectId/confirm-script', async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  const { projectId } = req.params;
+  const project = await getProjectByProjectId(projectId, userId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (project.status !== 'script_generated' || project.currentStage !== 'script') {
+    return res.status(400).json({
+      error: 'Project is not awaiting script confirmation.'
+    });
+  }
+
+  await updateProject(projectId, userId, {
+    currentStage: 'audio',
+    errorMessage: undefined
+  });
+  await pushStageHistory(projectId, userId, {
+    stage: 'script',
+    status: 'approved',
+    at: new Date().toISOString()
+  });
+
+  // Fire and forget to avoid long request durations.
+  (async () => {
+    try {
+      await runProjectAfterScriptApproval(userId, projectId, false);
+    } catch (err) {
+      logger.error('Project continuation after script confirm failed', err, { projectId });
+    }
+  })();
+
+  return res.json({ ok: true, projectId, status: 'script_generated', currentStage: 'audio' });
+});
+
+router.post('/:projectId/reject-script', async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  const { projectId } = req.params;
+  const project = await getProjectByProjectId(projectId, userId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (project.status !== 'script_generated' || project.currentStage !== 'script') {
+    return res.status(400).json({
+      error: 'Project is not awaiting script confirmation.'
+    });
+  }
+
+  const updated = await updateProject(projectId, userId, {
+    status: 'rejected',
+    currentStage: 'script',
+    errorMessage: 'Script rejected by user'
+  });
+  await pushStageHistory(projectId, userId, {
+    stage: 'script',
+    status: 'rejected',
+    at: new Date().toISOString()
+  });
+  return res.json({
+    ok: true,
+    projectId,
+    status: updated?.status ?? 'rejected'
+  });
 });
 
 router.get('/:projectId', async (req: AuthRequest, res: Response) => {
@@ -199,6 +267,27 @@ router.get('/:projectId/meta', async (req: AuthRequest, res: Response) => {
   return res.json(meta);
 });
 
+router.post('/:projectId/titles/suggest', async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  const { projectId } = req.params;
+  const project = await getProjectByProjectId(projectId, userId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (project.status !== 'assembly_done') {
+    return res.status(400).json({
+      error: 'Title suggestions are available only when project is in assembly_done state.'
+    });
+  }
+
+  try {
+    const script = await loadProjectScriptData(projectId, project);
+    if (!script) return res.status(404).json({ error: 'Script not found' });
+    const titles = await suggestFreshTitles(project.topic, script, 15);
+    return res.json({ titles });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 router.post('/:projectId/continue', async (req: AuthRequest, res: Response) => {
   const userId = req.user!.id;
   const { projectId } = req.params;
@@ -242,9 +331,11 @@ router.post('/:projectId/clips', upload.any(), async (req: AuthRequest, res: Res
   const workspace = getProjectWorkspaceDir(projectId);
   if (!fs.existsSync(workspace)) fs.mkdirSync(workspace, { recursive: true });
   const clipKeys: string[] = [...(project.clipKeys ?? [])];
+  let acceptedFiles = 0;
   for (const f of files) {
     const match = f.originalname?.match(/^clip_(\d+)\.mp4$/);
     if (!match) continue;
+    acceptedFiles += 1;
     const idx = parseInt(match[1], 10);
     const dest = path.join(workspace, `clip_${idx}.mp4`);
     try {
@@ -259,6 +350,9 @@ router.post('/:projectId/clips', upload.any(), async (req: AuthRequest, res: Res
     }
     const key = await uploadProjectFile(userId, projectId, `clip_${idx}.mp4`, dest);
     if (key) clipKeys[idx] = key;
+  }
+  if (acceptedFiles === 0) {
+    return res.status(400).json({ error: 'No valid clips found. Use file names like clip_0.mp4, clip_1.mp4, ...' });
   }
   await updateProject(projectId, userId, { clipKeys });
   res.json({ ok: true, clipKeys: clipKeys.filter(Boolean) });

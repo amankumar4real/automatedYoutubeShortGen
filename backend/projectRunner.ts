@@ -84,6 +84,42 @@ export async function runProjectPipeline(
     });
   }
 
+  // Stop after script generation and wait for explicit confirmation from UI.
+  return;
+}
+
+export async function runProjectAfterScriptApproval(
+  userId: string,
+  projectId: string,
+  testMode = false
+): Promise<void> {
+  const project = await getProjectByProjectId(projectId, userId);
+  if (!project) throw new Error('Project not found');
+  if (project.status !== 'script_generated') {
+    throw new Error('Project is not in script_generated state');
+  }
+  if (project.currentStage !== 'audio') {
+    throw new Error('Project is not confirmed for audio generation');
+  }
+
+  const workspace = getProjectWorkspaceDir(projectId);
+  const outputDir = getProjectOutputDir(projectId);
+  if (!fs.existsSync(workspace)) fs.mkdirSync(workspace, { recursive: true });
+  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+
+  await syncR2ToWorkspace(projectId, userId, {
+    scriptKey: project.scriptKey,
+    audioKeys: project.audioKeys,
+    clipKeys: project.clipKeys
+  });
+
+  const runOpts = {
+    topic: project.topic,
+    testMode,
+    projectTempDir: workspace,
+    projectOutputDir: outputDir
+  };
+
   // Step 2: audio
   try {
     await runShortPipeline({ ...runOpts, runStep: 2, reuseTemp: true });
