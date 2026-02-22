@@ -2,7 +2,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node backend/server.js",
-    "dev:server": "ts-node --prefer-ts-exts backend/server.ts",
+    "dev:server": "NODE_OPTIONS=--no-deprecation ts-node --prefer-ts-exts backend/server.ts",
     "dev:frontend": "npx serve frontend"
   },
   "dependencies": {

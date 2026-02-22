@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { runShortPipeline } from './pipeline/index';
+import { runShortPipeline, type RunShortOptions } from './pipeline/index';
 import {
   getProjectWorkspaceDir,
   getProjectOutputDir,
@@ -11,7 +11,8 @@ import {
   pushStageHistory,
   getProjectByProjectId
 } from './projects';
-import { ProjectDoc } from './db';
+import { CompetitorIntelSnapshot, ProjectDoc } from './db';
+import { getWebResearchContext } from './webResearchService';
 
 /** Fallback when fs.rmSync(..., { recursive: true }) fails (e.g. locked files). */
 function rmDirRecursive(dir: string): void {
@@ -28,7 +29,10 @@ export async function runProjectPipeline(
   userId: string,
   projectId: string,
   topic: string,
-  testMode: boolean
+  testMode: boolean,
+  developmentsContext?: string,
+  competitorIntel?: CompetitorIntelSnapshot | null,
+  useWebResearch = false
 ): Promise<void> {
   const workspace = getProjectWorkspaceDir(projectId);
   const outputDir = getProjectOutputDir(projectId);
@@ -42,15 +46,57 @@ export async function runProjectPipeline(
     scriptKey: project.scriptKey,
     audioKeys: project.audioKeys,
     clipKeys: project.clipKeys,
+    imageKeys: project.imageKeys,
     segmentMapKey: project.segmentMapKey,
     segmentAlignmentKey: project.segmentAlignmentKey
   });
 
-  const runOpts = {
+  const contextBlocks: string[] = [];
+  if (developmentsContext && developmentsContext.trim()) {
+    contextBlocks.push(developmentsContext.trim());
+  }
+  if (useWebResearch) {
+    try {
+      const webContext = await getWebResearchContext(topic, 6);
+      if (webContext.trim()) contextBlocks.push(webContext.trim());
+    } catch {
+      /* optional enrichment; ignore failures */
+    }
+  }
+  if (contextBlocks.length > 0) {
+    fs.writeFileSync(path.join(workspace, 'current_developments_raw.txt'), contextBlocks.join('\n\n'), 'utf-8');
+  }
+  if (project.useCompetitorIntel && competitorIntel) {
+    const compact = {
+      updatedAt: competitorIntel.updatedAt,
+      topTopics: competitorIntel.insights.topTopics ?? [],
+      titlePatterns: competitorIntel.insights.titlePatterns ?? [],
+      postingPatterns: competitorIntel.insights.postingPatterns ?? [],
+      opportunities: competitorIntel.insights.opportunities ?? [],
+      shortSuggestions: competitorIntel.insights.shortSuggestions ?? [],
+      longVideoSuggestions: competitorIntel.insights.longVideoSuggestions ?? []
+    };
+    fs.writeFileSync(
+      path.join(workspace, 'competitor_intel_raw.txt'),
+      JSON.stringify(compact, null, 2),
+      'utf-8'
+    );
+  }
+
+  const videoFormat: RunShortOptions['videoFormat'] =
+    (project.videoFormat === '5min' || project.videoFormat === '11min') ? project.videoFormat : 'short';
+
+  const runOpts: Omit<RunShortOptions, 'runStep' | 'reuseTemp'> & {
+    topic: string;
+    projectTempDir: string;
+    projectOutputDir: string;
+  } = {
     topic,
     testMode,
     projectTempDir: workspace,
-    projectOutputDir: outputDir
+    projectOutputDir: outputDir,
+    videoFormat,
+    ...(project.scriptProvider === 'grok' ? { scriptProvider: 'grok' as const } : {})
   };
 
   // Step 1: script
@@ -90,6 +136,97 @@ export async function runProjectPipeline(
   return;
 }
 
+/**
+ * Regenerate script and prompts for a project that is in script_generated / script stage.
+ * Optionally appends remarks to developments context so the new script can take them into account.
+ */
+export async function regenerateProjectScript(
+  userId: string,
+  projectId: string,
+  remarks?: string
+): Promise<void> {
+  const project = await getProjectByProjectId(projectId, userId);
+  if (!project) throw new Error('Project not found');
+  if (project.status !== 'script_generated' || project.currentStage !== 'script') {
+    throw new Error('Project is not awaiting script decision');
+  }
+
+  const workspace = getProjectWorkspaceDir(projectId);
+  const outputDir = getProjectOutputDir(projectId);
+  if (!fs.existsSync(workspace)) fs.mkdirSync(workspace, { recursive: true });
+  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+
+  await syncR2ToWorkspace(projectId, userId, {
+    scriptKey: project.scriptKey,
+    audioKeys: project.audioKeys,
+    clipKeys: project.clipKeys,
+    imageKeys: project.imageKeys,
+    segmentMapKey: project.segmentMapKey,
+    segmentAlignmentKey: project.segmentAlignmentKey
+  });
+
+  if (remarks && remarks.trim()) {
+    const rawPath = path.join(workspace, 'current_developments_raw.txt');
+    const existing = fs.existsSync(rawPath)
+      ? fs.readFileSync(rawPath, 'utf-8').trim()
+      : '';
+    const appended = existing
+      ? `${existing}\n\nUSER REMARKS (use to refine the script):\n${remarks.trim()}`
+      : `USER REMARKS (use to refine the script):\n${remarks.trim()}`;
+    fs.writeFileSync(rawPath, appended, 'utf-8');
+  }
+
+  const scriptPath = path.join(workspace, 'script.json');
+  if (fs.existsSync(scriptPath)) fs.unlinkSync(scriptPath);
+
+  const videoFormat: RunShortOptions['videoFormat'] =
+    (project.videoFormat === '5min' || project.videoFormat === '11min') ? project.videoFormat : 'short';
+
+  const runOpts: Omit<RunShortOptions, 'runStep' | 'reuseTemp'> & {
+    topic: string;
+    projectTempDir: string;
+    projectOutputDir: string;
+  } = {
+    topic: project.topic,
+    testMode: false,
+    projectTempDir: workspace,
+    projectOutputDir: outputDir,
+    videoFormat,
+    ...(project.scriptProvider === 'grok' ? { scriptProvider: 'grok' as const } : {})
+  };
+
+  try {
+    await runShortPipeline({ ...runOpts, runStep: 1, reuseTemp: true });
+  } catch (err) {
+    await updateProject(projectId, userId, {
+      status: 'error',
+      currentStage: 'script',
+      errorMessage: (err as Error).message
+    });
+    await pushStageHistory(projectId, userId, {
+      stage: 'script',
+      status: 'error',
+      at: new Date().toISOString(),
+      detail: (err as Error).message
+    });
+    throw err;
+  }
+
+  if (fs.existsSync(scriptPath)) {
+    const key = await uploadProjectFile(userId, projectId, 'script.json', scriptPath);
+    await updateProject(projectId, userId, {
+      status: 'script_generated',
+      currentStage: 'script',
+      scriptKey: key ?? undefined
+    });
+    await pushStageHistory(projectId, userId, {
+      stage: 'script',
+      status: 'done',
+      at: new Date().toISOString()
+    });
+  }
+}
+
 export async function runProjectAfterScriptApproval(
   userId: string,
   projectId: string,
@@ -113,15 +250,24 @@ export async function runProjectAfterScriptApproval(
     scriptKey: project.scriptKey,
     audioKeys: project.audioKeys,
     clipKeys: project.clipKeys,
+    imageKeys: project.imageKeys,
     segmentMapKey: project.segmentMapKey,
     segmentAlignmentKey: project.segmentAlignmentKey
   });
 
-  const runOpts = {
+  const videoFormat: RunShortOptions['videoFormat'] =
+    (project.videoFormat === '5min' || project.videoFormat === '11min') ? project.videoFormat : 'short';
+
+  const runOpts: Omit<RunShortOptions, 'runStep' | 'reuseTemp'> & {
+    topic: string;
+    projectTempDir: string;
+    projectOutputDir: string;
+  } = {
     topic: project.topic,
     testMode,
     projectTempDir: workspace,
-    projectOutputDir: outputDir
+    projectOutputDir: outputDir,
+    videoFormat
   };
 
   // Step 2: audio
@@ -207,8 +353,10 @@ export async function runProjectAssembly(userId: string, projectId: string): Pro
     scriptKey: project.scriptKey,
     audioKeys: project.audioKeys,
     clipKeys: project.clipKeys,
+    imageKeys: project.imageKeys,
     segmentMapKey: project.segmentMapKey,
-    segmentAlignmentKey: project.segmentAlignmentKey
+    segmentAlignmentKey: project.segmentAlignmentKey,
+    backgroundMusicKey: project.backgroundMusicKey
   });
 
   try {
@@ -217,7 +365,9 @@ export async function runProjectAssembly(userId: string, projectId: string): Pro
       projectTempDir: workspace,
       projectOutputDir: outputDir,
       runStep: 4,
-      reuseTemp: true
+      reuseTemp: true,
+      videoFormat: (project.videoFormat === '5min' || project.videoFormat === '11min') ? project.videoFormat : 'short',
+      ...(project.backgroundMusicKey ? { backgroundMusicPath: path.join(workspace, 'background_music.mp3'), backgroundMusicStartSec: project.backgroundMusicStartSec } : {})
     });
 
     const finalPath = path.join(outputDir, 'final_short.mp4');

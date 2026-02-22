@@ -17,6 +17,8 @@ const readline = require('readline') as typeof import('readline');
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const TEMP_DIR = path.resolve(process.cwd(), 'temp');
 const SELECTED_TOPIC_FILE = path.join(TEMP_DIR, 'selected_topic.txt');
+const USED_TOPICS_FILE = path.join(TEMP_DIR, 'used_topics.txt');
+const MAX_USED_TOPICS = 200;
 
 if (!OPENAI_KEY?.trim()) {
   console.error('Set OPENAI_API_KEY in .env');
@@ -52,6 +54,22 @@ function isDuplicate(newTopic: string, alreadySuggested: string[]): boolean {
   });
 }
 
+function loadUsedTopics(): string[] {
+  if (!fs.existsSync(USED_TOPICS_FILE)) return [];
+  const raw = fs.readFileSync(USED_TOPICS_FILE, 'utf-8').trim();
+  return raw ? raw.split('\n').map((l) => l.trim()).filter(Boolean) : [];
+}
+
+function appendUsedTopic(topic: string): void {
+  const t = (topic || '').trim();
+  if (!t) return;
+  const used = loadUsedTopics();
+  if (used.some((u) => normalizeTopic(u) === normalizeTopic(t))) return;
+  used.push(t);
+  const toWrite = used.slice(-MAX_USED_TOPICS).join('\n') + (used.length > MAX_USED_TOPICS ? '\n' : '');
+  fs.writeFileSync(USED_TOPICS_FILE, toWrite, 'utf-8');
+}
+
 async function fetchTopics(alreadySuggested: string[] = []): Promise<string[]> {
   const avoid =
     alreadySuggested.length > 0
@@ -64,14 +82,19 @@ async function fetchTopics(alreadySuggested: string[] = []): Promise<string[]> {
       {
         role: 'system',
         content:
-          'You suggest topics for 30–55 second dark, documentary-style YouTube Shorts. Reply with exactly 15 topics, one per line, no numbering, no extra text. Put TRENDING and currently viral topics at the very top (e.g. Epstein files, major recent revelations, widely discussed documentaries or news). Then mix in: true crime, disappearances, creepy, scary, and unthinkable/crazy. Each topic must have enough concrete beats for a gripping 30–55 second narration.'
+          'You suggest topics for 30–55 second documentary-style YouTube Shorts. Reply with exactly 15 topics, one per line, no numbering, no extra text. PRIORITIZE the genuinely bizarre, absurd, mind-bending, and WTF-worthy—the kind of stories that make people say "wait, that actually happened?" Maximize VARIETY: no two topics in one batch should feel like the same subgenre back-to-back. Mix wildly: historical oddities, science gone wrong, cursed/creepy objects, internet lore, hoaxes and cons, mass hysteria, bizarre experiments, unexplained phenomena, true crime with a twist, dangerous places, paranormal claims, cults, survival horror, and anything that sounds crazy but is real. Each topic must have enough concrete beats for a gripping 30–55 second narration. Real people and events only.'
       },
       {
         role: 'user',
-        content: `Suggest 15 dark, real-life topic ideas for a 30–55 second YouTube Short. Put TRENDING / viral / currently discussed topics FIRST (e.g. Epstein files, big recent news). Then include a mix: true crime, unsolved mystery, creepy, scary, unthinkable/crazy. Real people and events only. One topic per line, format: "Short title (optional brief context)". Do not suggest only murders or disappearances. ${avoid ? '\n' + avoid + '\n' : ''}`
+        content: `Suggest 15 real-life topic ideas for a 30–55 second YouTube Short. This batch must feel DIVERSE and UNPREDICTABLE.
+
+- Go CRAZY and BIZARRE: favor the weird, the absurd, the "that can't be real" stories. Mix in: historical oddities, science disasters, cursed artifacts, viral hoaxes, mass delusions, bizarre experiments, unexplained phenomena, true crime with a twist, dangerous places, cults, survival stories, internet lore, and anything that makes viewers do a double-take.
+- VARIETY is critical: do NOT give 5 similar true-crime topics or 5 similar "mystery" topics. Jump between eras, regions, and subgenres. Each of the 15 should feel like a different flavor.
+- Format: one topic per line, e.g. "Short punchy title (optional brief context)". Real people and events only.
+${avoid ? '\n' + avoid + '\n' : ''}`
       }
     ],
-    temperature: 0.85
+    temperature: 0.95
   });
   const text = (res.choices[0]?.message?.content ?? '').trim();
   const lines = text
@@ -85,11 +108,12 @@ async function fetchTopics(alreadySuggested: string[] = []): Promise<string[]> {
 async function main() {
   if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-  let allSuggested: string[] = [];
+  const usedFromFile = loadUsedTopics();
+  let allSuggested: string[] = [...usedFromFile];
   let currentBatch: string[] = [];
 
   while (true) {
-    console.log('\nFetching 15 topics (trending / widely discussed first)...\n');
+    console.log('\nFetching 15 crazy / bizarre topics (varied mix)...\n');
     currentBatch = await fetchTopics(allSuggested);
     allSuggested = [...allSuggested, ...currentBatch];
 
@@ -113,6 +137,7 @@ async function main() {
         continue;
       }
       fs.writeFileSync(SELECTED_TOPIC_FILE, chosen, 'utf-8');
+      appendUsedTopic(chosen);
       console.log(`\nSelected: ${chosen}`);
       console.log(`Saved to ${SELECTED_TOPIC_FILE}. Run automate_shorts and it will use this topic.\n`);
       process.exit(0);

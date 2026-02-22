@@ -7,6 +7,7 @@ import multer from 'multer';
 import {
   createProject,
   listProjects,
+  listProjectsPaginated,
   getProjectByProjectId,
   getAssetUrl,
   getProjectWorkspaceDir,
@@ -17,11 +18,12 @@ import {
   deleteProject
 } from '../projects';
 import { getObjectJson } from '../r2';
-import { runProjectPipeline, runProjectAfterScriptApproval, runProjectAssembly } from '../projectRunner';
+import { runProjectPipeline, runProjectAfterScriptApproval, runProjectAssembly, regenerateProjectScript } from '../projectRunner';
 import { authMiddleware, AuthRequest } from '../middleware';
 import { logger } from '../logger';
 import { config } from '../config';
 import { suggestFreshTitles } from '../titleService';
+import { getCompetitorIntelForUser } from '../userIntel';
 
 const router = Router();
 
@@ -92,7 +94,16 @@ async function loadProjectScriptData(projectId: string, project: { scriptKey?: s
   const scriptPathExists = fs.existsSync(scriptPath);
   let script: ScriptData | null = null;
 
-  if (project.scriptKey) {
+  // Prefer local workspace file when it exists (e.g. right after regenerate-script) so we always serve the latest.
+  if (scriptPathExists) {
+    try {
+      script = JSON.parse(fs.readFileSync(scriptPath, 'utf-8')) as ScriptData;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (!script && project.scriptKey) {
     script = await getObjectJson<ScriptData>(project.scriptKey);
     if (!script) {
       try {
@@ -102,16 +113,8 @@ async function loadProjectScriptData(projectId: string, project: { scriptKey?: s
           if (resp.ok) script = (await resp.json()) as ScriptData;
         }
       } catch {
-        /* fall back to local file */
+        /* ignore */
       }
-    }
-  }
-
-  if (!script && scriptPathExists) {
-    try {
-      script = JSON.parse(fs.readFileSync(scriptPath, 'utf-8')) as ScriptData;
-    } catch {
-      /* ignore */
     }
   }
 
@@ -123,17 +126,47 @@ async function loadProjectScriptData(projectId: string, project: { scriptKey?: s
 
 router.post('/', async (req: AuthRequest, res: Response) => {
   const userId = req.user!.id;
-  const body = req.body as { topic?: string; idempotencyKey?: string };
+  const body = req.body as {
+    topic?: string;
+    idempotencyKey?: string;
+    developmentsContext?: string;
+    videoFormat?: string;
+    useCompetitorIntel?: boolean;
+    useWebResearch?: boolean;
+    scriptProvider?: string;
+  };
   const topic = body.topic?.trim();
   if (!topic) return res.status(400).json({ error: 'topic is required' });
 
+  const developmentsContext = body.developmentsContext?.trim() || undefined;
+  const videoFormat = (body.videoFormat === '5min' || body.videoFormat === '11min') ? body.videoFormat : undefined;
+  const useCompetitorIntel = !!body.useCompetitorIntel;
+  const useWebResearch = !!body.useWebResearch;
+  const scriptProvider = body.scriptProvider === 'grok' ? 'grok' as const : undefined;
   const idempotencyKey = body.idempotencyKey ?? (req.headers['idempotency-key'] as string | undefined);
   try {
-    const { project, created } = await createProject(userId, topic, idempotencyKey);
+    const { project, created } = await createProject(
+      userId,
+      topic,
+      idempotencyKey,
+      videoFormat,
+      useCompetitorIntel,
+      useWebResearch,
+      scriptProvider
+    );
     if (created) {
       (async () => {
         try {
-          await runProjectPipeline(userId, project.projectId, project.topic, false);
+          const competitorIntel = useCompetitorIntel ? await getCompetitorIntelForUser(userId) : null;
+          await runProjectPipeline(
+            userId,
+            project.projectId,
+            project.topic,
+            false,
+            developmentsContext,
+            competitorIntel,
+            useWebResearch
+          );
         } catch (err) {
           logger.error('Project pipeline failed', err, { projectId: project.projectId });
         }
@@ -156,6 +189,29 @@ router.post('/', async (req: AuthRequest, res: Response) => {
 router.get('/', async (req: AuthRequest, res: Response) => {
   const userId = req.user!.id;
   try {
+    const hasPage = typeof req.query.page !== 'undefined' || typeof req.query.pageSize !== 'undefined';
+    if (hasPage) {
+      const page = parseInt(String(req.query.page ?? '1'), 10) || 1;
+      const pageSize = parseInt(String(req.query.pageSize ?? '10'), 10) || 10;
+      const paged = await listProjectsPaginated(userId, page, pageSize);
+      const items = await Promise.all(
+        paged.items.map(async (p) => ({
+          projectId: p.projectId,
+          topic: p.topic,
+          status: p.status,
+          currentStage: p.currentStage,
+          updatedAt: p.updatedAt.toISOString(),
+          finalVideoUrl: p.finalVideoKey ? await getAssetUrl(p.finalVideoKey) : null
+        }))
+      );
+      return res.json({
+        items,
+        page: paged.page,
+        pageSize: paged.pageSize,
+        total: paged.total,
+        totalPages: paged.totalPages
+      });
+    }
     const projects = await listProjects(userId);
     const list = await Promise.all(
       projects.map(async (p) => ({
@@ -256,6 +312,24 @@ router.post('/:projectId/reject-script', async (req: AuthRequest, res: Response)
   });
 });
 
+router.post('/:projectId/regenerate-script', async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  const { projectId } = req.params;
+  const body = (req.body || {}) as { remarks?: string };
+  const project = await getProjectByProjectId(projectId, userId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (project.status !== 'script_generated' || project.currentStage !== 'script') {
+    return res.status(400).json({ error: 'Project is not awaiting script decision.' });
+  }
+  try {
+    await regenerateProjectScript(userId, projectId, typeof body.remarks === 'string' ? body.remarks : undefined);
+    return res.json({ ok: true });
+  } catch (err) {
+    logger.error('Regenerate script failed', err as Error, { projectId });
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 router.get('/:projectId', async (req: AuthRequest, res: Response) => {
   const userId = req.user!.id;
   const { projectId } = req.params;
@@ -310,6 +384,8 @@ router.get('/:projectId', async (req: AuthRequest, res: Response) => {
     audioSegmentUrls: audioSegmentUrls.filter((u): u is string => !!u),
     requiredFiles: project.requiredFiles,
     errorMessage: project.errorMessage,
+    videoFormat: project.videoFormat ?? 'short',
+    backgroundMusicStartSec: project.backgroundMusicStartSec ?? 0,
     updatedAt: project.updatedAt.toISOString(),
     createdAt: project.createdAt.toISOString()
   });
@@ -482,31 +558,104 @@ router.post('/:projectId/clips', upload.any(), async (req: AuthRequest, res: Res
   const workspace = getProjectWorkspaceDir(projectId);
   if (!fs.existsSync(workspace)) fs.mkdirSync(workspace, { recursive: true });
   const clipKeys: string[] = [...(project.clipKeys ?? [])];
+  const imageKeys: string[] = [...(project.imageKeys ?? [])];
   let acceptedFiles = 0;
   for (const f of files) {
-    const match = f.originalname?.match(/^clip_(\d+)\.mp4$/);
-    if (!match) continue;
-    acceptedFiles += 1;
-    const idx = parseInt(match[1], 10);
-    const dest = path.join(workspace, `clip_${idx}.mp4`);
-    try {
-      fs.renameSync(f.path, dest);
-    } catch {
-      fs.copyFileSync(f.path, dest);
+    const clipMatch = f.originalname?.match(/^clip_(\d+)\.mp4$/i);
+    const imageMatch = f.originalname?.match(/^image_(\d+)\.(jpg|jpeg|png|webp)$/i);
+    if (clipMatch) {
+      acceptedFiles += 1;
+      const idx = parseInt(clipMatch[1], 10);
+      const dest = path.join(workspace, `clip_${idx}.mp4`);
       try {
-        fs.unlinkSync(f.path);
+        fs.renameSync(f.path, dest);
       } catch {
-        /* ignore */
+        fs.copyFileSync(f.path, dest);
+        try {
+          fs.unlinkSync(f.path);
+        } catch {
+          /* ignore */
+        }
       }
+      const key = await uploadProjectFile(userId, projectId, `clip_${idx}.mp4`, dest);
+      if (key) clipKeys[idx] = key;
+    } else if (imageMatch) {
+      acceptedFiles += 1;
+      const idx = parseInt(imageMatch[1], 10);
+      const ext = imageMatch[2].toLowerCase();
+      const dest = path.join(workspace, `image_${idx}.${ext}`);
+      try {
+        fs.renameSync(f.path, dest);
+      } catch {
+        fs.copyFileSync(f.path, dest);
+        try {
+          fs.unlinkSync(f.path);
+        } catch {
+          /* ignore */
+        }
+      }
+      const imageKey = await uploadProjectFile(userId, projectId, `image_${idx}.${ext}`, dest);
+      if (imageKey) imageKeys[idx] = imageKey;
     }
-    const key = await uploadProjectFile(userId, projectId, `clip_${idx}.mp4`, dest);
-    if (key) clipKeys[idx] = key;
   }
   if (acceptedFiles === 0) {
-    return res.status(400).json({ error: 'No valid clips found. Use file names like clip_0.mp4, clip_1.mp4, ...' });
+    return res.status(400).json({
+      error: 'No valid files. Use clip_0.mp4, clip_1.mp4, … or image_0.jpg, image_1.png, … for photos/documents (zoom effect).'
+    });
   }
-  await updateProject(projectId, userId, { clipKeys });
+  await updateProject(projectId, userId, { clipKeys, imageKeys: imageKeys.filter(Boolean).length ? imageKeys : undefined });
   res.json({ ok: true, clipKeys: clipKeys.filter(Boolean) });
+});
+
+router.post('/:projectId/background-music', upload.single('file'), async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  const { projectId } = req.params;
+  const project = await getProjectByProjectId(projectId, userId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (project.status !== 'waiting_for_clips') {
+    return res.status(400).json({ error: 'Background music can only be set when project is waiting for clips.' });
+  }
+  const file = (req as { file?: Express.Multer.File }).file;
+  if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+  const workspace = getProjectWorkspaceDir(projectId);
+  if (!fs.existsSync(workspace)) fs.mkdirSync(workspace, { recursive: true });
+  const dest = path.join(workspace, 'background_music.mp3');
+  try {
+    fs.renameSync(file.path, dest);
+  } catch {
+    fs.copyFileSync(file.path, dest);
+    try {
+      fs.unlinkSync(file.path);
+    } catch {
+      /* ignore */
+    }
+  }
+  const key = await uploadProjectFile(userId, projectId, 'background_music.mp3', dest);
+  if (!key) return res.status(500).json({ error: 'Failed to store background music' });
+  const startSecRaw = (req.body && typeof (req.body as { backgroundMusicStartSec?: unknown }).backgroundMusicStartSec !== 'undefined')
+    ? (req.body as { backgroundMusicStartSec?: number }).backgroundMusicStartSec
+    : undefined;
+  const backgroundMusicStartSec = typeof startSecRaw === 'number' && !Number.isNaN(startSecRaw) && startSecRaw >= 0
+    ? Math.round(startSecRaw)
+    : undefined;
+  await updateProject(projectId, userId, { backgroundMusicKey: key, ...(backgroundMusicStartSec !== undefined ? { backgroundMusicStartSec } : {}) });
+  res.json({ ok: true, backgroundMusicKey: key, ...(backgroundMusicStartSec !== undefined ? { backgroundMusicStartSec } : {}) });
+});
+
+router.patch('/:projectId', async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  const { projectId } = req.params;
+  const project = await getProjectByProjectId(projectId, userId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const body = req.body as { backgroundMusicStartSec?: unknown };
+  if (body.backgroundMusicStartSec !== undefined) {
+    const n = typeof body.backgroundMusicStartSec === 'number' ? body.backgroundMusicStartSec : parseFloat(String(body.backgroundMusicStartSec));
+    const backgroundMusicStartSec = !Number.isNaN(n) && n >= 0 ? Math.round(n) : 0;
+    await updateProject(projectId, userId, { backgroundMusicStartSec });
+  }
+  const updated = await getProjectByProjectId(projectId, userId);
+  return res.json(updated ?? project);
 });
 
 router.delete('/:projectId', async (req: AuthRequest, res: Response) => {

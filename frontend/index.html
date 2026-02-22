@@ -498,6 +498,7 @@
               </div>
               <div class="suggest-btn-wrap">
                 <button id="btnSuggestTopic" type="button" class="secondary">Suggest topic</button>
+                <button id="btnTrendingTopic" type="button" class="secondary">Get trending topic</button>
               </div>
             </div>
             <div id="topicSuggestions" class="suggestions-overlay">
@@ -505,12 +506,78 @@
               <div class="suggestions-overlay-list"></div>
             </div>
           </div>
+          <div style="margin-bottom: 1rem;">
+            <label for="topicScriptProvider">Topic & script provider</label>
+            <select id="topicScriptProvider" style="margin-top: 0.25rem;">
+              <option value="openai">GPT (OpenAI)</option>
+              <option value="grok">Grok (xAI)</option>
+            </select>
+          </div>
+          <div style="margin-bottom: 1rem;">
+            <label for="videoFormat">Video length</label>
+            <select id="videoFormat" style="margin-top: 0.25rem;">
+              <option value="short">Short (~1 min, 9:16)</option>
+              <option value="5min">5 min (16:9)</option>
+              <option value="11min">11 min (16:9)</option>
+            </select>
+          </div>
+          <div style="margin-bottom: 1rem;">
+            <label for="developmentsContext">Recent context / developments (optional)</label>
+            <textarea id="developmentsContext" rows="3" placeholder="Paste headlines, links, or notes from the last 24h; we'll structure them for the script." style="width: 100%; resize: vertical; margin-top: 0.25rem;"></textarea>
+          </div>
+          <div style="margin-bottom: 1rem;">
+            <label style="display:flex;align-items:center;gap:0.5rem;">
+              <input id="useCompetitorIntel" type="checkbox" />
+              Use saved competitor insights for script generation
+            </label>
+          </div>
+          <div style="margin-bottom: 1rem;">
+            <label style="display:flex;align-items:center;gap:0.5rem;">
+              <input id="useWebResearch" type="checkbox" />
+              Search web for latest topic context
+            </label>
+          </div>
           <button id="btnNewProject" type="button" class="primary btn-full">Create new short</button>
         </div>
         <div class="card">
-          <div class="card-header">Your projects</div>
+          <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 0.6rem;">
+            <div class="card-header" style="margin: 0;">Recent projects</div>
+            <button id="btnMoreProjects" type="button" class="secondary">More</button>
+          </div>
           <ul id="projectList" class="project-list"></ul>
           <div id="projectListEmpty" class="small empty-projects" style="display: none;">No projects yet. Create one above.</div>
+        </div>
+        <div class="card">
+          <div class="card-header">Competitor radar</div>
+          <label for="competitorTheme">Discover by theme</label>
+          <div class="row" style="align-items: center; margin-bottom: 0.6rem;">
+            <input id="competitorTheme" type="text" class="grow" placeholder="e.g. true crime documentary, dark history, mystery shorts" />
+            <input id="competitorMinSubs" type="text" value="10000" style="max-width: 140px;" title="Minimum subscribers" />
+            <button id="btnDiscoverCompetitors" type="button" class="secondary">Discover channels</button>
+          </div>
+          <label for="competitorChannels">Competitor channels (one per line)</label>
+          <textarea id="competitorChannels" rows="4" placeholder="@channelHandle&#10;https://youtube.com/@another&#10;UCxxxxxxxxxxxxxxxxxxxxxx"></textarea>
+          <div class="row" style="align-items: center; margin-top: 0.6rem;">
+            <button id="btnAnalyzeCompetitors" type="button" class="secondary">Analyze competitors</button>
+            <span id="competitorStatus" class="small"></span>
+          </div>
+          <div id="competitorInsights" class="small" style="margin-top: 0.75rem;"></div>
+        </div>
+      </div>
+
+      <div id="pageProjectsAll" class="page">
+        <div class="detail-header">
+          <a href="#/projects" class="link nav-back">← Back to projects</a>
+        </div>
+        <h1>All Projects</h1>
+        <div class="card">
+          <ul id="projectListAll" class="project-list"></ul>
+          <div id="projectListAllEmpty" class="small empty-projects" style="display: none;">No projects yet.</div>
+          <div class="row" style="justify-content: space-between; align-items: center; margin-top: 0.6rem;">
+            <button id="btnProjectsPrev" type="button" class="secondary">Previous</button>
+            <span id="projectsPageInfo" class="small"></span>
+            <button id="btnProjectsNext" type="button" class="secondary">Next</button>
+          </div>
         </div>
       </div>
 
@@ -533,14 +600,27 @@
           <div id="waitingForClipsBox" class="waiting-box" style="display: none;">
             <div class="small">
               Add these files, then <strong>Upload clips</strong> and <strong>Continue assembly</strong>.
-              Name files <code>clip_0.mp4</code>, <code>clip_1.mp4</code>, etc.
+              Each clip: <code>clip_0.mp4</code>, <code>clip_1.mp4</code>, … (max <strong>10 sec</strong> per clip). Or use a photo/document for a scene: <code>image_0.jpg</code>, <code>image_1.png</code> (we'll add a zoom-in effect).
             </div>
             <div class="small">You can select and upload multiple files in one action.</div>
             <ul id="requiredFilesList" class="small" style="margin: 0.5rem 0; padding-left: 1.25rem"></ul>
             <div class="row" style="align-items: center; margin-top: 0.75rem; gap: 0.5rem;">
-              <input id="clipFiles" type="file" multiple accept="video/mp4" />
+              <input id="clipFiles" type="file" multiple accept="video/mp4,image/jpeg,image/png,image/webp" />
               <button id="uploadClipsBtn" type="button" class="secondary">Upload clips</button>
               <button id="continueBtn" type="button" class="primary">Continue assembly</button>
+            </div>
+            <div class="small" style="margin-top: 1rem;">
+              <strong>Background music (optional)</strong>
+              <span style="color: var(--muted); margin-left: 0.25rem;">If you don't upload, we'll use the default background music.</span>
+            </div>
+            <div class="row" style="align-items: center; margin-top: 0.35rem; gap: 0.5rem;">
+              <input id="backgroundMusicFile" type="file" accept="audio/mpeg,audio/mp3,.mp3" />
+              <button id="uploadBackgroundMusicBtn" type="button" class="secondary">Upload background music</button>
+              <span id="backgroundMusicMsg" class="small" style="margin-left: 0.25rem;"></span>
+            </div>
+            <div class="row" style="align-items: center; margin-top: 0.5rem; gap: 0.5rem;">
+              <label for="backgroundMusicStartSec" class="small">Start music at (seconds):</label>
+              <input id="backgroundMusicStartSec" type="number" min="0" step="1" value="0" style="width: 5rem;" title="Start the background track from this position (e.g. 30 = skip first 30 seconds)" />
             </div>
           </div>
         </div>
@@ -567,6 +647,11 @@
           </div>
           <div id="scriptDecisionBox" class="waiting-box script-decision-box" style="display: none;">
             <div class="small">Review the generated script. Confirm to continue pipeline, or reject permanently.</div>
+            <div style="margin-top: 0.5rem;">
+              <label for="scriptRemarks" class="small">Remarks (optional)</label>
+              <textarea id="scriptRemarks" rows="2" placeholder="e.g. make it shorter, focus on X, add more facts about Y" style="width: 100%; resize: vertical; margin-top: 0.25rem;"></textarea>
+              <button id="refreshScriptBtn" type="button" class="secondary" style="margin-top: 0.35rem;">Refresh script</button>
+            </div>
             <div class="btn-group" style="margin-top: 0.5rem;">
               <button id="confirmScriptBtn" type="button" class="primary">Confirm script</button>
               <button id="rejectScriptBtn" type="button" class="danger">Reject permanently</button>
@@ -636,9 +721,29 @@
       }
       function setApiBase(b) { localStorage.setItem(API_BASE_KEY, (b || '').replace(/\/$/, '')); }
 
-      // In-memory topic suggestion state for the current session
+      // Topic suggestion: persist used topics so we avoid suggesting them again across sessions
+      const USED_TOPICS_KEY = 'shorts_used_topics';
+      const MAX_USED_TOPICS = 200;
+      function getUsedTopicsFromStorage() {
+        try {
+          var raw = localStorage.getItem(USED_TOPICS_KEY);
+          var arr = raw ? JSON.parse(raw) : [];
+          return Array.isArray(arr) ? arr.filter(function(t) { return typeof t === 'string' && t.trim(); }).slice(-MAX_USED_TOPICS) : [];
+        } catch (e) { return []; }
+      }
+      function addUsedTopicToStorage(topic) {
+        var t = (topic || '').trim();
+        if (!t) return;
+        var used = getUsedTopicsFromStorage();
+        var n = t.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+        if (used.some(function(u) { var e = u.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim(); return e === n || e.indexOf(n) !== -1 || n.indexOf(e) !== -1; })) return;
+        used.push(t);
+        localStorage.setItem(USED_TOPICS_KEY, JSON.stringify(used.slice(-MAX_USED_TOPICS)));
+      }
       let suggestedTopics = [];
-      let seenTopics = [];
+      let seenTopics = getUsedTopicsFromStorage();
+      let allProjectsPage = 1;
+      let allProjectsTotalPages = 1;
 
       function normalizeTopic(t) {
         return (t || '').toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
@@ -696,9 +801,9 @@
         return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
       }
 
-      function renderProjectList(projects) {
-        const list = document.getElementById('projectList');
-        const empty = document.getElementById('projectListEmpty');
+      function renderProjectList(projects, listId = 'projectList', emptyId = 'projectListEmpty') {
+        const list = document.getElementById(listId);
+        const empty = document.getElementById(emptyId);
         if (!list) return;
         list.innerHTML = '';
         if (!projects || !projects.length) {
@@ -728,6 +833,48 @@
         });
       }
 
+      function escapeHtml(str) {
+        return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      function renderList(items) {
+        if (!Array.isArray(items) || items.length === 0) return '<div class="small">None</div>';
+        return '<ul style="margin:0.35rem 0 0.65rem 1rem;padding:0;">' + items.map((x) => '<li>' + escapeHtml(x) + '</li>').join('') + '</ul>';
+      }
+
+      function renderCompetitorInsights(data) {
+        const box = document.getElementById('competitorInsights');
+        if (!box) return;
+        if (!data || !data.insights) {
+          box.innerHTML = '<div class="err">No analysis available.</div>';
+          return;
+        }
+        const ch = Array.isArray(data.channels) ? data.channels : [];
+        const channelRows = ch.map(function(c) {
+          var uploads = Array.isArray(c.uploads) ? c.uploads.length : 0;
+          return '<li><strong>' + escapeHtml(c.channelTitle || c.input || 'Channel') + '</strong> (' + uploads + ' videos)</li>';
+        }).join('');
+        const shortButtons = Array.isArray(data.insights.shortSuggestions)
+          ? data.insights.shortSuggestions.map(function(s) {
+            return '<button type="button" class="chip js-use-short-suggestion" data-suggestion="' + escapeHtml(s) + '" style="margin:0.2rem 0.2rem 0.2rem 0;">' + escapeHtml(s) + '</button>';
+          }).join('')
+          : '';
+        const longButtons = Array.isArray(data.insights.longVideoSuggestions)
+          ? data.insights.longVideoSuggestions.map(function(s) {
+            return '<div class="small" style="margin:0.25rem 0;">- ' + escapeHtml(s) + '</div>';
+          }).join('')
+          : '';
+        box.innerHTML =
+          '<div><strong>Top topics</strong>' + renderList(data.insights.topTopics) + '</div>' +
+          '<div><strong>Title patterns</strong>' + renderList(data.insights.titlePatterns) + '</div>' +
+          '<div><strong>Posting patterns</strong>' + renderList(data.insights.postingPatterns) + '</div>' +
+          '<div><strong>Opportunities</strong>' + renderList(data.insights.opportunities) + '</div>' +
+          '<div><strong>Short suggestions (35-45s)</strong><div>' + (shortButtons || '<div class="small">None</div>') + '</div></div>' +
+          '<div><strong>Long-video suggestions (5-11 min)</strong><div>' + (longButtons || '<div class="small">None</div>') + '</div></div>' +
+          '<div><strong>Suggested ideas</strong>' + renderList(data.insights.suggestedIdeas) + '</div>' +
+          '<div><strong>Channels analyzed</strong><ul style="margin:0.35rem 0 0 1rem;padding:0;">' + channelRows + '</ul></div>';
+      }
+
       function applyRoute() {
         const rawHash = (window.location.hash || '#/').slice(1);
         const hash = rawHash.replace(/^\/+/, '');
@@ -752,6 +899,12 @@
           loadProjectsPage();
           return;
         }
+        if (hash === 'projects/all') {
+          if (detailPollTimer) { clearInterval(detailPollTimer); detailPollTimer = null; }
+          showPage('pageProjectsAll');
+          loadAllProjectsPage(allProjectsPage);
+          return;
+        }
         const match = hash.match(/^projects\/([^/]+)$/);
         if (match) {
           showPage('pageProjectDetail');
@@ -766,12 +919,36 @@
         const userName = document.getElementById('userName');
         if (userName) userName.textContent = getUserName() || '(user)';
         try {
-          const res = await authFetch('/api/projects');
+          const res = await authFetch('/api/projects?page=1&pageSize=5');
           if (!res.ok) throw new Error('Failed to load projects');
-          const projects = await res.json();
-          renderProjectList(projects);
+          const payload = await res.json();
+          const projects = Array.isArray(payload.items) ? payload.items : (Array.isArray(payload) ? payload : []);
+          renderProjectList(projects, 'projectList', 'projectListEmpty');
         } catch (e) {
-          if (e.message !== 'Unauthorized') renderProjectList([]);
+          if (e.message !== 'Unauthorized') renderProjectList([], 'projectList', 'projectListEmpty');
+        }
+      }
+
+      async function loadAllProjectsPage(page) {
+        const targetPage = Math.max(1, parseInt(String(page || 1), 10) || 1);
+        try {
+          const res = await authFetch('/api/projects?page=' + targetPage + '&pageSize=10');
+          if (!res.ok) throw new Error('Failed to load projects');
+          const payload = await res.json();
+          const items = Array.isArray(payload.items) ? payload.items : [];
+          allProjectsPage = Number(payload.page || targetPage);
+          allProjectsTotalPages = Number(payload.totalPages || 1);
+          renderProjectList(items, 'projectListAll', 'projectListAllEmpty');
+          const info = document.getElementById('projectsPageInfo');
+          const prev = document.getElementById('btnProjectsPrev');
+          const next = document.getElementById('btnProjectsNext');
+          if (info) info.textContent = 'Page ' + allProjectsPage + ' of ' + allProjectsTotalPages;
+          if (prev) prev.disabled = allProjectsPage <= 1;
+          if (next) next.disabled = allProjectsPage >= allProjectsTotalPages;
+        } catch (e) {
+          renderProjectList([], 'projectListAll', 'projectListAllEmpty');
+          const info = document.getElementById('projectsPageInfo');
+          if (info) info.textContent = 'Failed to load projects';
         }
       }
 
@@ -793,7 +970,7 @@
         if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
         if (contentEl) contentEl.style.display = 'none';
         try {
-          const res = await authFetch('/api/projects/' + encodeURIComponent(projectId) + '/script');
+          const res = await authFetch('/api/projects/' + encodeURIComponent(projectId) + '/script?_t=' + Date.now());
           if (currentProjectId !== projectId) return;
           if (!res.ok) {
             if (errorEl) { errorEl.textContent = 'Prompts will appear after script is generated.'; errorEl.style.display = 'block'; }
@@ -811,10 +988,14 @@
             if (voiceoverWrap) voiceoverWrap.style.display = 'block';
           } else if (voiceoverWrap) voiceoverWrap.style.display = 'none';
           if (scenesEl) {
+            var maxSec = 10;
+            if (script.scenes.length && typeof script.scenes[0].duration === 'number') maxSec = script.scenes[0].duration;
             scenesEl.innerHTML = script.scenes.map(function(s, i) {
+              var dur = typeof s.duration === 'number' ? s.duration : maxSec;
               var sceneVo = s.voiceover ? '<div class="small" style="margin-top:0.35rem;color:var(--text-dim);">' + String(s.voiceover).replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>' : '';
               var promptOnlyId = 'scene-prompt-text-' + i;
-              return '<div class="scene-prompt"><div class="scene-prompt-content"><div class="scene-num">Scene ' + (i + 1) + '</div><div class="prompt-block" id="' + promptOnlyId + '">' + String(s.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>' + sceneVo + '</div><button type="button" class="copy-btn copy-btn-sm" data-copy-target="' + promptOnlyId + '">Copy</button></div>';
+              var clipLabel = 'clip_' + i + '.mp4 \u00B7 max ' + dur + ' sec';
+              return '<div class="scene-prompt"><div class="scene-prompt-content"><div class="scene-num">Scene ' + (i + 1) + ' \u2192 ' + clipLabel + '</div><div class="prompt-block" id="' + promptOnlyId + '">' + String(s.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>' + sceneVo + '</div><button type="button" class="copy-btn copy-btn-sm" data-copy-target="' + promptOnlyId + '">Copy</button></div>';
             }).join('');
           }
           if (toggleBtn) {
@@ -883,6 +1064,8 @@
             const hist = data.stageHistory || [];
             stageHistoryEl.innerHTML = hist.length ? hist.map((h) => '<div>' + (h.stage || '') + ': ' + (h.status || '') + (h.at ? ' @ ' + h.at : '') + '</div>').join('') : '';
           }
+          var startSecEl = document.getElementById('backgroundMusicStartSec');
+          if (startSecEl) startSecEl.value = String(data.backgroundMusicStartSec != null && data.backgroundMusicStartSec >= 0 ? data.backgroundMusicStartSec : 0);
           if (data.status === 'waiting_for_clips') {
             if (waitingBox) waitingBox.style.display = 'block';
             if (requiredList) requiredList.innerHTML = (data.requiredFiles || []).map((f) => '<li>' + f + '</li>').join('');
@@ -1054,6 +1237,80 @@
           setUserName(null);
           window.location.hash = '#/login';
         };
+        document.getElementById('btnMoreProjects').onclick = () => {
+          allProjectsPage = 1;
+          window.location.hash = '#/projects/all';
+        };
+        document.getElementById('btnProjectsPrev').onclick = () => {
+          if (allProjectsPage > 1) loadAllProjectsPage(allProjectsPage - 1);
+        };
+        document.getElementById('btnProjectsNext').onclick = () => {
+          if (allProjectsPage < allProjectsTotalPages) loadAllProjectsPage(allProjectsPage + 1);
+        };
+
+        document.getElementById('btnDiscoverCompetitors').onclick = async () => {
+          const theme = (document.getElementById('competitorTheme').value || '').trim();
+          const minSubsRaw = (document.getElementById('competitorMinSubs').value || '').trim();
+          const minSubscribers = parseInt(minSubsRaw || '10000', 10);
+          const statusEl = document.getElementById('competitorStatus');
+          const channelsEl = document.getElementById('competitorChannels');
+          if (!theme) {
+            if (statusEl) statusEl.textContent = 'Enter a theme first.';
+            return;
+          }
+          const btn = document.getElementById('btnDiscoverCompetitors');
+          btn.disabled = true;
+          if (statusEl) statusEl.textContent = 'Discovering channels…';
+          try {
+            const res = await authFetch('/api/competitors/discover', {
+              method: 'POST',
+              body: JSON.stringify({ theme, maxResults: 10, minSubscribers: Number.isFinite(minSubscribers) ? Math.max(0, minSubscribers) : 10000 })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Failed to discover channels');
+            const channels = Array.isArray(data.channels) ? data.channels : [];
+            const lines = channels.map((c) => c.handle || c.channelId).filter(Boolean);
+            if (channelsEl) channelsEl.value = lines.join('\n');
+            if (statusEl) statusEl.textContent = channels.length ? ('Found ' + channels.length + ' channels.') : 'No channels found.';
+          } catch (e) {
+            if (statusEl) statusEl.textContent = (e && e.message) || 'Discovery failed';
+          } finally {
+            btn.disabled = false;
+          }
+        };
+
+        document.getElementById('btnAnalyzeCompetitors').onclick = async () => {
+          const input = (document.getElementById('competitorChannels').value || '').trim();
+          const statusEl = document.getElementById('competitorStatus');
+          const insightsEl = document.getElementById('competitorInsights');
+          if (!input) {
+            if (statusEl) statusEl.textContent = 'Add at least one channel.';
+            return;
+          }
+          const channels = input
+            .split(/\n|,/)
+            .map((x) => x.trim())
+            .filter(Boolean);
+          const btn = document.getElementById('btnAnalyzeCompetitors');
+          btn.disabled = true;
+          if (statusEl) statusEl.textContent = 'Analyzing…';
+          if (insightsEl) insightsEl.innerHTML = '';
+          try {
+            const res = await authFetch('/api/competitors/analyze', {
+              method: 'POST',
+              body: JSON.stringify({ channels, maxPerChannel: 20 })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Failed to analyze competitors');
+            renderCompetitorInsights(data);
+            if (statusEl) statusEl.textContent = 'Analysis ready.';
+          } catch (e) {
+            if (statusEl) statusEl.textContent = '';
+            if (insightsEl) insightsEl.innerHTML = '<div class="err">' + escapeHtml((e && e.message) || 'Analysis failed') + '</div>';
+          } finally {
+            btn.disabled = false;
+          }
+        };
 
         const suggestBtn = document.getElementById('btnSuggestTopic');
         const topicInput = document.getElementById('topic');
@@ -1071,7 +1328,8 @@
           }
           document.addEventListener('click', function(e) {
             if (!topicSuggestionsEl.classList.contains('is-visible')) return;
-            if (topicSuggestionsEl.contains(e.target) || suggestBtn.contains(e.target)) return;
+            var trendingBtn = document.getElementById('btnTrendingTopic');
+            if (topicSuggestionsEl.contains(e.target) || suggestBtn.contains(e.target) || (trendingBtn && trendingBtn.contains(e.target))) return;
             hideOverlay();
           });
           suggestBtn.onclick = async () => {
@@ -1079,10 +1337,15 @@
             const originalText = suggestBtn.textContent;
             suggestBtn.textContent = 'Fetching…';
             hideOverlay();
+            var overlayTitle = topicSuggestionsEl.querySelector('.suggestions-overlay-title');
+            if (overlayTitle) overlayTitle.textContent = 'Suggested Topics';
             try {
+              var providerEl = document.getElementById('topicScriptProvider');
+              var provider = (providerEl && providerEl.value === 'grok') ? 'grok' : 'openai';
               const res = await authFetch('/api/topics/suggest', {
                 method: 'POST',
-                body: JSON.stringify({ previous: seenTopics })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ previous: seenTopics, provider: provider })
               });
               const data = await res.json().catch(() => ({}));
               if (!res.ok || !data.topics || !Array.isArray(data.topics)) {
@@ -1119,18 +1382,94 @@
           };
         }
 
+        const btnTrendingTopic = document.getElementById('btnTrendingTopic');
+        if (btnTrendingTopic && topicInput && topicSuggestionsEl) {
+          var overlayListTrending = topicSuggestionsEl.querySelector('.suggestions-overlay-list');
+          function showOverlayTrending(html) {
+            if (overlayListTrending) overlayListTrending.innerHTML = html;
+            topicSuggestionsEl.classList.add('is-visible');
+          }
+          function hideOverlayTrending() {
+            topicSuggestionsEl.classList.remove('is-visible');
+            if (overlayListTrending) overlayListTrending.innerHTML = '';
+          }
+          btnTrendingTopic.onclick = async () => {
+            btnTrendingTopic.disabled = true;
+            const originalText = btnTrendingTopic.textContent;
+            btnTrendingTopic.textContent = 'Fetching…';
+            hideOverlayTrending();
+            var overlayTitle = topicSuggestionsEl.querySelector('.suggestions-overlay-title');
+            if (overlayTitle) overlayTitle.textContent = 'Trending topics';
+            try {
+              var providerElTrending = document.getElementById('topicScriptProvider');
+              var providerTrending = (providerElTrending && providerElTrending.value === 'grok') ? 'grok' : 'openai';
+              const res = await authFetch('/api/topics/trending', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ previous: seenTopics, provider: providerTrending })
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok || !data.topics || !Array.isArray(data.topics)) {
+                throw new Error(data.error || 'Trending topics unavailable');
+              }
+              var newOnes = data.topics.filter(function(t) { return !isAlreadySeen(t, seenTopics); });
+              suggestedTopics = newOnes;
+              seenTopics = seenTopics.concat(newOnes);
+              topicInput.value = suggestedTopics[0] || topicInput.value || '';
+              if (!newOnes.length) {
+                showOverlayTrending('<span class="suggestions-message">No new trending topics this batch. Click again for more.</span>');
+              } else {
+                var chipsHtml = suggestedTopics.map(function(t, idx) {
+                  var cls = 'chip' + (idx === 0 ? ' selected' : '');
+                  return '<button type="button" class="' + cls + '" data-idx="' + idx + '">' + t.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') + '</button>';
+                }).join('');
+                showOverlayTrending(chipsHtml);
+                topicSuggestionsEl.querySelectorAll('button[data-idx]').forEach(function(btn) {
+                  btn.addEventListener('click', function() {
+                    var i = parseInt(btn.getAttribute('data-idx'), 10);
+                    if (isNaN(i) || !suggestedTopics[i]) return;
+                    topicInput.value = suggestedTopics[i];
+                    topicSuggestionsEl.querySelectorAll('.chip').forEach(function(c) { c.classList.remove('selected'); });
+                    btn.classList.add('selected');
+                  });
+                });
+              }
+            } catch (e) {
+              showOverlayTrending('<span class="suggestions-message err">' + ((e && e.message) || 'Trending topics failed') + '</span>');
+            } finally {
+              btnTrendingTopic.disabled = false;
+              btnTrendingTopic.textContent = originalText;
+            }
+          };
+        }
+
         document.getElementById('btnNewProject').onclick = async () => {
           const topic = document.getElementById('topic').value.trim();
           if (!topic) { alert('Enter a topic'); return; }
+          const developmentsContext = (document.getElementById('developmentsContext') && document.getElementById('developmentsContext').value || '').trim();
+          const useCompetitorIntel = !!(document.getElementById('useCompetitorIntel') && document.getElementById('useCompetitorIntel').checked);
+          const useWebResearch = !!(document.getElementById('useWebResearch') && document.getElementById('useWebResearch').checked);
+          const videoFormatEl = document.getElementById('videoFormat');
+          const videoFormat = (videoFormatEl && videoFormatEl.value === '5min') ? '5min' : (videoFormatEl && videoFormatEl.value === '11min') ? '11min' : undefined;
+          const topicScriptProviderEl = document.getElementById('topicScriptProvider');
+          const scriptProvider = (topicScriptProviderEl && topicScriptProviderEl.value === 'grok') ? 'grok' : undefined;
+          const body = { topic };
+          if (developmentsContext) body.developmentsContext = developmentsContext;
+          if (videoFormat) body.videoFormat = videoFormat;
+          if (useCompetitorIntel) body.useCompetitorIntel = true;
+          if (useWebResearch) body.useWebResearch = true;
+          if (scriptProvider) body.scriptProvider = scriptProvider;
           const btn = document.getElementById('btnNewProject');
           btn.disabled = true;
           try {
             const res = await authFetch('/api/projects', {
               method: 'POST',
-              body: JSON.stringify({ topic })
+              body: JSON.stringify(body)
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || 'Failed to create project');
+            addUsedTopicToStorage(topic);
+            seenTopics = getUsedTopicsFromStorage();
             window.location.hash = '#/projects/' + data.projectId;
           } catch (e) {
             alert(e.message || 'Failed to create project');
@@ -1219,6 +1558,38 @@
           }
         });
 
+        document.getElementById('refreshScriptBtn')?.addEventListener('click', async () => {
+          if (!currentProjectId) return;
+          const refreshBtn = document.getElementById('refreshScriptBtn');
+          const confirmBtn = document.getElementById('confirmScriptBtn');
+          const rejectBtn = document.getElementById('rejectScriptBtn');
+          const scriptRemarks = document.getElementById('scriptRemarks');
+          const msgEl = document.getElementById('scriptDecisionMsg');
+          const remarks = (scriptRemarks && scriptRemarks.value && scriptRemarks.value.trim()) ? scriptRemarks.value.trim() : undefined;
+          if (refreshBtn) refreshBtn.disabled = true;
+          if (confirmBtn) confirmBtn.disabled = true;
+          if (rejectBtn) rejectBtn.disabled = true;
+          if (msgEl) msgEl.textContent = 'Regenerating script…';
+          try {
+            const res = await authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/regenerate-script', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ remarks: remarks })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Refresh script failed');
+            detailScriptLoaded = false;
+            await loadProjectScript(currentProjectId);
+            if (msgEl) msgEl.textContent = '';
+          } catch (e) {
+            if (msgEl) msgEl.textContent = (e && e.message) || 'Refresh script failed';
+          } finally {
+            if (refreshBtn) refreshBtn.disabled = false;
+            if (confirmBtn) confirmBtn.disabled = false;
+            if (rejectBtn) rejectBtn.disabled = false;
+          }
+        });
+
         document.getElementById('uploadClipsBtn').onclick = async () => {
           if (!currentProjectId) return;
           const input = document.getElementById('clipFiles');
@@ -1259,6 +1630,54 @@
           } finally {
             btn.disabled = false;
             btn.textContent = 'Upload clips';
+          }
+        };
+
+        document.getElementById('backgroundMusicStartSec').addEventListener('change', async function() {
+          if (!currentProjectId) return;
+          var val = parseInt(this.value, 10);
+          if (isNaN(val) || val < 0) return;
+          try {
+            await authFetch('/api/projects/' + encodeURIComponent(currentProjectId), {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ backgroundMusicStartSec: val })
+            });
+          } catch (e) { /* ignore */ }
+        });
+
+        document.getElementById('uploadBackgroundMusicBtn').onclick = async () => {
+          if (!currentProjectId) return;
+          const input = document.getElementById('backgroundMusicFile');
+          const file = input && input.files && input.files[0] ? input.files[0] : null;
+          const msgEl = document.getElementById('backgroundMusicMsg');
+          if (!file) {
+            if (msgEl) { msgEl.textContent = 'Select a file first.'; msgEl.classList.add('err'); }
+            return;
+          }
+          const btn = document.getElementById('uploadBackgroundMusicBtn');
+          btn.disabled = true;
+          if (msgEl) { msgEl.textContent = ''; msgEl.classList.remove('err'); }
+          try {
+            const form = new FormData();
+            form.append('file', file);
+            var startSecInput = document.getElementById('backgroundMusicStartSec');
+            if (startSecInput && startSecInput.value !== '') {
+              var sec = parseInt(startSecInput.value, 10);
+              if (!isNaN(sec) && sec >= 0) form.append('backgroundMusicStartSec', String(sec));
+            }
+            const res = await authFetch('/api/projects/' + encodeURIComponent(currentProjectId) + '/background-music', {
+              method: 'POST',
+              body: form
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Upload failed');
+            if (msgEl) { msgEl.textContent = 'Background music uploaded.'; msgEl.classList.remove('err'); }
+            if (input) input.value = '';
+          } catch (e) {
+            if (msgEl) { msgEl.textContent = e.message || 'Upload failed'; msgEl.classList.add('err'); }
+          } finally {
+            btn.disabled = false;
           }
         };
 
@@ -1349,6 +1768,13 @@
         }
 
         document.body.addEventListener('click', (e) => {
+          const useShort = e.target.closest('.js-use-short-suggestion');
+          if (useShort) {
+            const val = useShort.getAttribute('data-suggestion') || '';
+            const topicEl = document.getElementById('topic');
+            if (topicEl) topicEl.value = val;
+            return;
+          }
           const btn = e.target.closest('.copy-btn');
           if (!btn) return;
           e.preventDefault();

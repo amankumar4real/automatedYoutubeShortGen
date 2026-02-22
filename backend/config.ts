@@ -19,7 +19,14 @@ export const config = {
   port: parseInt(process.env.PORT || '4000', 10),
 
   mongodb: {
-    uri: env('MONGODB_URI', 'mongodb://localhost:27017'),
+    // In development, "mongo" host only resolves inside Docker; use localhost when running on host
+    uri: (() => {
+      let uri = env('MONGODB_URI', 'mongodb://localhost:27017');
+      if (NODE_ENV !== 'production' && uri.includes('mongo')) {
+        uri = uri.replace('//mongo:', '//localhost:').replace('@mongo:', '@localhost:');
+      }
+      return uri;
+    })(),
     dbName: env('MONGODB_DB_NAME', 'shorts')
   },
 

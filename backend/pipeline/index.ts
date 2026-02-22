@@ -9,6 +9,14 @@ export type RunShortOptions = {
   /** When set, pipeline uses project workspace and output dirs */
   projectTempDir?: string;
   projectOutputDir?: string;
+  /** Video format: short (~1 min), 5min, or 11min. Sets length, scene count, aspect ratio. */
+  videoFormat?: 'short' | '5min' | '11min';
+  /** Script generation: openai (GPT) or grok. Env SCRIPT_PROVIDER passed to child. */
+  scriptProvider?: 'openai' | 'grok';
+  /** Optional absolute path to background music for assembly (step 4). Sets env BACKGROUND_MUSIC_PATH. */
+  backgroundMusicPath?: string;
+  /** Start background music from this many seconds into the track (0 = from start). Sets env BACKGROUND_MUSIC_START_SEC. */
+  backgroundMusicStartSec?: number;
 };
 
 export type RunShortResult = {
@@ -41,6 +49,19 @@ export async function runShortPipeline(opts: RunShortOptions = {}): Promise<RunS
   if (opts.topic) {
     env.SHORT_TOPIC_OVERRIDE = opts.topic;
   }
+  if (opts.videoFormat && ['short', '5min', '11min'].includes(opts.videoFormat)) {
+    env.VIDEO_FORMAT = opts.videoFormat;
+  }
+  if (opts.scriptProvider && (opts.scriptProvider === 'openai' || opts.scriptProvider === 'grok')) {
+    env.SCRIPT_PROVIDER = opts.scriptProvider;
+  }
+  if (opts.backgroundMusicPath) {
+    env.BACKGROUND_MUSIC_PATH = opts.backgroundMusicPath;
+  }
+  if (opts.backgroundMusicStartSec != null && opts.backgroundMusicStartSec > 0) {
+    env.BACKGROUND_MUSIC_START_SEC = String(opts.backgroundMusicStartSec);
+  }
+  env.CURSOR_DEBUG_LOG_PATH = path.resolve(process.cwd(), '.cursor', 'debug.log');
 
   const outputPath = path.join(outputDir, 'final_short.mp4');
   const youtubeMetaPath = path.join(outputDir, 'youtube_meta.json');

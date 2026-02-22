@@ -56,22 +56,18 @@ export async function suggestFreshTitles(topic: string, script: ScriptData, coun
       {
         role: 'system',
         content:
-          'You write viral-yet-accurate YouTube Shorts titles for dark documentary stories. Return plain text only: exactly one title per line, no numbering, no markdown, no commentary.'
+          'You write YouTube Shorts titles. Direct, fact-based, personal tone—match the script. One title per line, no numbering, no markdown, no hashtags or emojis.'
       },
       {
         role: 'user',
-        content: `Generate exactly ${count} fresh YouTube Shorts title options for this story.
-Requirements:
-- Highly clickable and algorithm-friendly, but no fake claims.
-- Keep each title concise (about 45-75 characters ideal for Shorts).
-- Keep tone dark, documentary, suspenseful.
-- Avoid repetitive wording and duplicate structures.
-- Do NOT include hashtags or emojis.
+        content: `Generate exactly ${count} title options for this story.
+- Direct and fact-based: one clear fact or hook per title. No hype, no fake claims.
+- Concise (about 45–75 characters). Vary structure; no duplicate phrasing.
+- Tone matches the script: personal, concrete.
 
-Topic:
-${topic}
+Topic: ${topic}
 
-Script voiceover:
+Script:
 ${script.voiceover || ''}
 
 Scene context:

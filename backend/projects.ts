@@ -28,7 +28,11 @@ export function getProjectOutputDir(projectId: string): string {
 export async function createProject(
   userId: string,
   topic: string,
-  idempotencyKey?: string
+  idempotencyKey?: string,
+  videoFormat?: 'short' | '5min' | '11min',
+  useCompetitorIntel?: boolean,
+  useWebResearch?: boolean,
+  scriptProvider?: 'openai' | 'grok'
 ): Promise<{ project: ProjectDoc; created: boolean }> {
   const db = await getDb();
   const coll = db.collection<ProjectDoc>(PROJECTS_COLL);
@@ -57,6 +61,10 @@ export async function createProject(
     segmentAlignmentKey: undefined,
     requiredFiles: undefined,
     errorMessage: undefined,
+    videoFormat: videoFormat && ['short', '5min', '11min'].includes(videoFormat) ? videoFormat : undefined,
+    useCompetitorIntel: !!useCompetitorIntel,
+    useWebResearch: !!useWebResearch,
+    scriptProvider: scriptProvider === 'grok' ? 'grok' : undefined,
     createdAt: now,
     updatedAt: now
   };
@@ -98,10 +106,38 @@ export async function listProjects(userId: string): Promise<ProjectDoc[]> {
     .toArray();
 }
 
+export async function listProjectsPaginated(
+  userId: string,
+  page: number,
+  pageSize: number
+): Promise<{ items: ProjectDoc[]; total: number; page: number; pageSize: number; totalPages: number }> {
+  const db = await getDb();
+  const coll = db.collection<ProjectDoc>(PROJECTS_COLL);
+  const safePageSize = Math.max(1, Math.min(50, Math.floor(pageSize || 10)));
+  const safePage = Math.max(1, Math.floor(page || 1));
+  const query = { userId: new ObjectId(userId) };
+  const total = await coll.countDocuments(query);
+  const totalPages = Math.max(1, Math.ceil(total / safePageSize));
+  const pageClamped = Math.min(safePage, totalPages);
+  const items = await coll
+    .find(query)
+    .sort({ updatedAt: -1 })
+    .skip((pageClamped - 1) * safePageSize)
+    .limit(safePageSize)
+    .toArray();
+  return {
+    items,
+    total,
+    page: pageClamped,
+    pageSize: safePageSize,
+    totalPages
+  };
+}
+
 export async function updateProject(
   projectId: string,
   userId: string,
-  update: Partial<Pick<ProjectDoc, 'status' | 'currentStage' | 'stageHistory' | 'scriptKey' | 'audioKeys' | 'clipKeys' | 'finalVideoKey' | 'youtubeMetaKey' | 'segmentMapKey' | 'segmentAlignmentKey' | 'requiredFiles' | 'errorMessage'>>
+  update: Partial<Pick<ProjectDoc, 'status' | 'currentStage' | 'stageHistory' | 'scriptKey' | 'audioKeys' | 'clipKeys' | 'imageKeys' | 'finalVideoKey' | 'youtubeMetaKey' | 'segmentMapKey' | 'segmentAlignmentKey' | 'backgroundMusicKey' | 'backgroundMusicStartSec' | 'requiredFiles' | 'errorMessage'>>
 ): Promise<ProjectDoc | null> {
   const db = await getDb();
   const coll = db.collection<ProjectDoc>(PROJECTS_COLL);
@@ -137,8 +173,10 @@ export async function syncR2ToWorkspace(projectId: string, userId: string, keys:
   scriptKey?: string;
   audioKeys?: string[];
   clipKeys?: string[];
+  imageKeys?: string[];
   segmentMapKey?: string;
   segmentAlignmentKey?: string;
+  backgroundMusicKey?: string;
 }): Promise<void> {
   const fs = await import('fs');
   const workspace = getProjectWorkspaceDir(projectId);
@@ -164,6 +202,13 @@ export async function syncR2ToWorkspace(projectId: string, userId: string, keys:
       await downloadToFile(keys.clipKeys[i], dest);
     }
   }
+  if (keys.imageKeys?.length) {
+    for (const key of keys.imageKeys.filter(Boolean)) {
+      const fileName = (key as string).split('/').pop() || (key as string);
+      const dest = path.join(workspace, fileName);
+      await downloadToFile(key as string, dest);
+    }
+  }
   if (keys.segmentMapKey) {
     const outputDir = getProjectOutputDir(projectId);
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
@@ -173,6 +218,10 @@ export async function syncR2ToWorkspace(projectId: string, userId: string, keys:
     const outputDir = getProjectOutputDir(projectId);
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
     await downloadToFile(keys.segmentAlignmentKey, path.join(outputDir, 'segment_alignment.json'));
+  }
+  if (keys.backgroundMusicKey) {
+    const dest = path.join(workspace, 'background_music.mp3');
+    await downloadToFile(keys.backgroundMusicKey, dest);
   }
 }
 
@@ -198,9 +247,10 @@ export async function uploadWorkspaceToR2(
   scriptKey?: string;
   audioKeys?: string[];
   clipKeys?: string[];
+  imageKeys?: string[];
  }> {
   const fs = await import('fs');
-  const out: { scriptKey?: string; audioKeys?: string[]; clipKeys?: string[] } = {};
+  const out: { scriptKey?: string; audioKeys?: string[]; clipKeys?: string[]; imageKeys?: string[] } = {};
   const scriptPath = path.join(workspaceDir, 'script.json');
   if (fs.existsSync(scriptPath)) {
     const k = await uploadProjectFile(userId, projectId, 'script.json', scriptPath);
@@ -232,6 +282,18 @@ export async function uploadWorkspaceToR2(
     i++;
   }
   if (clipKeys.length) out.clipKeys = clipKeys;
+  const imageKeys: string[] = [];
+  const imageNames = fs.readdirSync(workspaceDir).filter((n) => /^image_\d+\.(jpg|jpeg|png|webp)$/i.test(n));
+  imageNames.sort((a, b) => {
+    const na = parseInt(a.replace(/^image_(\d+).*/, '$1'), 10);
+    const nb = parseInt(b.replace(/^image_(\d+).*/, '$1'), 10);
+    return na - nb;
+  });
+  for (const name of imageNames) {
+    const k = await uploadProjectFile(userId, projectId, name, path.join(workspaceDir, name));
+    if (k) imageKeys.push(k);
+  }
+  if (imageKeys.length) out.imageKeys = imageKeys;
   return out;
 }
 

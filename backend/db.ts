@@ -27,7 +27,33 @@ export interface UserDoc {
   _id: import('mongodb').ObjectId;
   username: string;
   passwordHash: string;
+  competitorIntel?: CompetitorIntelSnapshot;
   createdAt: Date;
+}
+
+export interface CompetitorIntelSnapshot {
+  updatedAt: string;
+  channels: Array<{
+    input: string;
+    channelId: string;
+    channelTitle: string;
+    uploads: Array<{
+      videoId: string;
+      title: string;
+      publishedAt: string;
+      duration: string;
+      viewCount: number;
+    }>;
+  }>;
+  insights: {
+    topTopics: string[];
+    titlePatterns: string[];
+    postingPatterns: string[];
+    opportunities: string[];
+    suggestedIdeas: string[];
+    shortSuggestions?: string[];
+    longVideoSuggestions?: string[];
+  };
 }
 
 export type ProjectStatus =
@@ -58,12 +84,25 @@ export interface ProjectDoc {
   scriptKey?: string;
   audioKeys?: string[];
   clipKeys?: string[];
+  imageKeys?: string[];
   finalVideoKey?: string;
   youtubeMetaKey?: string;
   segmentMapKey?: string;
   segmentAlignmentKey?: string;
+  /** R2 key for optional per-project background music (assembly step 4). */
+  backgroundMusicKey?: string;
+  /** Start background music from this many seconds into the track (0 = from start). */
+  backgroundMusicStartSec?: number;
   requiredFiles?: string[];
   errorMessage?: string;
+  /** Video format: short (~1 min), 5min, or 11min. Default short. */
+  videoFormat?: 'short' | '5min' | '11min';
+  /** Whether project script should use saved competitor intel context. */
+  useCompetitorIntel?: boolean;
+  /** Whether project script should include fresh web research context. */
+  useWebResearch?: boolean;
+  /** Provider for script (and topic if chosen at create): openai (GPT) or grok. */
+  scriptProvider?: 'openai' | 'grok';
   createdAt: Date;
   updatedAt: Date;
 }
